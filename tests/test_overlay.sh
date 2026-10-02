@@ -153,3 +153,10 @@ test_overlay_deny_rule_present_in_base_and_overlay_appears_once() {
   base_n="$(jq '.permissions.deny | length' "$REPO/claude/settings.json")"
   if jq -e --argjson n "$base_n" '.permissions.deny | length == $n' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "duplicate deny rule was not collapsed"; fi
 }
+
+test_overlay_plugin_arrays_are_unioned_with_base() {
+  new_overlay
+  printf '{"plugin":["work-plugin@1.0.0"]}\n' > "$OV/opencode/opencode.json"
+  run_install
+  if jq -e '.plugin | index("work-plugin@1.0.0") != null and index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "base and overlay plugins should both be present"; fi
+}

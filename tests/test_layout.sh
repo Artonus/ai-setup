@@ -136,3 +136,9 @@ test_layout_secrets_md_documents_every_env_reference() {
 test_layout_secrets_md_contains_no_values() {
   if grep -Eq '(sk-[A-Za-z0-9]{10,}|ctx7sk-|Bearer [A-Za-z0-9._-]{20,})' "$ROOT/SECRETS.md" 2>/dev/null; then fail "SECRETS.md looks like it contains a real key"; else ok; fi
 }
+
+test_layout_opencode_installs_superpowers_plugin_v1_style() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$o" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugin"; fi
+  if jq -e 'has("plugins") | not' "$o" >/dev/null; then ok; else fail "OpenCode V1 uses .plugin, not .plugins"; fi
+}

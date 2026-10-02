@@ -63,6 +63,13 @@ Google Cloud project with the Calendar API and Calendar MCP API enabled and a we
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set `"enabled": true` in your
 overlay's `opencode/opencode.json`, then sign in with `opencode mcp auth google-calendar`.
 
+## OpenCode plugins
+
+`superpowers` is installed through OpenCode's plugin list and tracks the upstream `main`
+branch (no version pin), so an upstream change reaches your sessions on the next OpenCode
+start. To pin, append a tag: `...superpowers.git#v6.4.2`. This targets OpenCode V1 (`plugin`);
+on V2 the key is `plugins`. Verify by asking OpenCode: "Tell me about your superpowers".
+
 ## Adding things
 
 - A skill: `shared/skills/<name>/SKILL.md`, then `./install.sh`.
