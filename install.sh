@@ -14,6 +14,17 @@ UNINSTALL=0
 CHANGES=0
 NEW_MANIFEST=""
 
+# Deep merge of two JSON documents (slurped as .[0] base, .[1] overlay):
+# objects merge recursively, arrays are unioned, other values come from the overlay.
+MERGE_JQ='def merge($a; $b):
+  if ($a|type) == "object" and ($b|type) == "object" then
+    reduce ($b|keys_unsorted[]) as $k ($a;
+      .[$k] = (if has($k) then merge(.[$k]; $b[$k]) else $b[$k] end))
+  elif ($a|type) == "array" and ($b|type) == "array" then
+    reduce $b[] as $x ($a; if index([$x]) == null then . + [$x] else . end)
+  else $b end;
+merge(.[0]; .[1])'
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [--dry-run] [--uninstall]
@@ -24,6 +35,10 @@ Symlinks the shared Claude Code / OpenCode config into ~/.claude and
   --dry-run    Show what would change; touch nothing.
   --uninstall  Remove everything a previous run created (backups are kept).
   -h, --help   Show this help.
+
+Environment:
+  AI_SETUP_OVERLAY  Directory with a private overlay (shared/, claude/, opencode/)
+                    layered on top of this repo. See overlay.example/.
 EOF
 }
 
@@ -81,11 +96,22 @@ opencode_subdir() {
   esac
 }
 
-# src_for <area> <rel>: where <area>/<rel> comes from.
-src_for() { printf '%s\n' "$REPO/$1/$2"; }
+# src_for <area> <rel>: the overlay's path when it has one, else the base path.
+src_for() {
+  if [ -n "${AI_SETUP_OVERLAY:-}" ] && [ -e "$AI_SETUP_OVERLAY/$1/$2" ]; then
+    printf '%s\n' "$AI_SETUP_OVERLAY/$1/$2"
+  else
+    printf '%s\n' "$REPO/$1/$2"
+  fi
+}
 
-# children <area> <subdir>: entry names inside <area>/<subdir>.
-children() { ls -1 "$REPO/$1/$2" 2>/dev/null | grep -v '^\.gitkeep$' || true; }
+# children <area> <subdir>: union of entry names in the base and the overlay.
+children() {
+  {
+    ls -1 "$REPO/$1/$2" 2>/dev/null || true
+    if [ -n "${AI_SETUP_OVERLAY:-}" ]; then ls -1 "$AI_SETUP_OVERLAY/$1/$2" 2>/dev/null || true; fi
+  } | grep -v '^\.gitkeep$' | sort -u || true
+}
 
 # link_children <area> <kind> <destdir>: link every entry of <area>/<kind> into <destdir>.
 link_children() {
@@ -98,8 +124,44 @@ link_children() {
   done < <(children "$1" "$2")
 }
 
-# install_json <area> <name> <dest>: install a JSON config.
-install_json() { link "$(src_for "$1" "$2")" "$3"; }
+place_copy() { mkdir -p "$(dirname "$2")" && cp "$1" "$2"; }
+
+# write_generated <tmpfile> <dest>: install a generated regular file (idempotent).
+write_generated() {
+  local tmp=$1 dest=$2
+  record "$dest"
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$tmp" "$dest"; then return 0; fi
+  clear_dest "$dest"
+  act "write $dest (merged with overlay)" place_copy "$tmp" "$dest"
+}
+
+# install_json <area> <name> <dest>: symlink the base config, or write base+overlay merged.
+install_json() {
+  local base="$REPO/$1/$2" over="" tmp
+  if [ -n "${AI_SETUP_OVERLAY:-}" ] && [ -f "$AI_SETUP_OVERLAY/$1/$2" ]; then
+    over="$AI_SETUP_OVERLAY/$1/$2"
+  fi
+  if [ -z "$over" ]; then
+    link "$base" "$3"
+    return 0
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/ai-setup-json.XXXXXX")"
+  jq -s "$MERGE_JQ" "$base" "$over" > "$tmp"
+  write_generated "$tmp" "$3"
+  rm -f "$tmp"
+}
+
+# preflight_overlay: fail early, before any change, on a bad overlay.
+preflight_overlay() {
+  [ -n "${AI_SETUP_OVERLAY:-}" ] || return 0
+  [ -d "$AI_SETUP_OVERLAY" ] || die "AI_SETUP_OVERLAY is not a directory: $AI_SETUP_OVERLAY"
+  local f
+  for f in claude/settings.json opencode/opencode.json; do
+    [ -f "$AI_SETUP_OVERLAY/$f" ] || continue
+    command -v jq >/dev/null 2>&1 || die "jq is required to merge $f from the overlay"
+    jq empty "$AI_SETUP_OVERLAY/$f" >/dev/null 2>&1 || die "invalid JSON in overlay: $AI_SETUP_OVERLAY/$f"
+  done
+}
 
 install_all() {
   local kind
@@ -153,6 +215,8 @@ main() {
     esac
     shift
   done
+
+  preflight_overlay
 
   NEW_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/ai-setup.XXXXXX")"
   trap 'rm -f "$NEW_MANIFEST"' EXIT
