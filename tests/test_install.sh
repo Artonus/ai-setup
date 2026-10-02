@@ -77,3 +77,11 @@ test_install_leaves_symlinked_dir_alone_when_repo_has_nothing_to_link() {
   assert_link "$HOME/.claude/agents" "$T/my-agents"
   assert_eq 0 "$(count_backups "$HOME/.claude/agents")" "no backup of the user's agents dir"
 }
+
+test_install_commit_command_linked_into_both_tools_and_idempotent() {
+  run_install
+  assert_link "$HOME/.claude/commands/commit.md" "$REPO/shared/commands/commit.md"
+  assert_link "$HOME/.config/opencode/commands/commit.md" "$REPO/shared/commands/commit.md"
+  run_install
+  assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
+}

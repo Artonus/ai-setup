@@ -56,3 +56,26 @@ test_layout_settings_keep_outward_actions_prompting() {
   if jq -e '[.permissions.allow[] | select(test("^Bash\\((git push|gh pr create|npm install|pnpm install|pip install)"))] | length == 0' "$s" >/dev/null; then ok; else fail "an outward-facing command is allowed"; fi
   if jq -e '(.permissions.allow - .permissions.deny) == .permissions.allow' "$s" >/dev/null; then ok; else fail "a rule is in both allow and deny"; fi
 }
+
+test_layout_agents_md_keeps_original_and_new_rules() {
+  local a
+  a="$(cat "$ROOT/shared/AGENTS.md")"
+  assert_contains "$a" "Ask before destructive" "original rule: ask before destructive actions"
+  assert_contains "$a" "Match the style" "original rule: match style"
+  assert_contains "$a" "Never write secrets" "original rule: no secrets"
+  assert_contains "$a" "Run the project's tests before claiming" "rule: run tests"
+  assert_contains "$a" "Commit only when asked" "rule: commit only when asked"
+  assert_contains "$a" "conventional commits" "rule: conventional commits"
+  assert_contains "$a" "unless the repo's recent history or its own CLAUDE.md" "rule: commit style defers to the repo"
+  assert_contains "$a" "Prefer editing existing files" "rule: prefer editing"
+  assert_contains "$a" "Do not add dependencies without saying so" "rule: dependencies"
+}
+
+test_layout_commit_command_has_only_description_frontmatter() {
+  local f="$ROOT/shared/commands/commit.md" keys
+  if [ -f "$f" ]; then ok; else fail "missing shared/commands/commit.md"; return; fi
+  assert_eq "---" "$(sed -n 1p "$f")" "frontmatter opens on line 1"
+  keys="$(awk 'NR==1{next} /^---$/{exit} {print}' "$f" | sed 's/:.*//' | sort -u | tr '\n' ' ')"
+  assert_eq "description " "$keys" "frontmatter has only description"
+  assert_contains "$(cat "$f")" "conventional" "commit command defaults to conventional commits"
+}
