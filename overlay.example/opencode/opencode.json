@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "internal-docs": {
+      "type": "remote",
+      "url": "https://mcp.internal.example.com/mcp",
+      "headers": { "Authorization": "Bearer {env:WORK_MCP_TOKEN}" }
+    }
+  }
+}
