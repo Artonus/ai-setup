@@ -154,3 +154,7 @@ test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {
   if jq -e '.mcpServers.trilium.type == "http" and .mcpServers.trilium.url == "https://trilium.example.com/mcp"' "$m" >/dev/null; then ok; else fail "trilium not declared in claude/mcp.json"; fi
   if jq -e '[.mcpServers[].headers // {} | to_entries[].value] | all(test("^Bearer \\$\\{[A-Z0-9_]+\\}$"))' "$m" >/dev/null; then ok; else fail "claude MCP header is not a \${VAR} reference"; fi
 }
+
+test_layout_anthropic_skills_is_a_submodule() {
+  if grep -q 'vendor/anthropic-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "anthropic skills submodule not declared"; fi
+}

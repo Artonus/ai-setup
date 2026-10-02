@@ -10,12 +10,18 @@ this repo.
 |---|---|
 | `shared/AGENTS.md` | Global rules, linked into both tools |
 | `shared/skills/` | One folder per skill, linked into `~/.claude/skills` (OpenCode reads that too) |
+| `vendor/anthropic-skills/` | Git submodule of [anthropics/skills](https://github.com/anthropics/skills); each skill in it is linked into `~/.claude/skills` too (a same-named skill in `shared/skills/` wins) |
 | `shared/agents/`, `shared/commands/` | One file per agent / command, linked into both tools |
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
 | `opencode/` | `opencode.json` |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install
+
+```bash
+git clone --recurse-submodules <repo-url>   # or, in an existing clone:
+git submodule update --init
+```
 
 Requires bash and, only when you use an overlay with JSON configs, `jq`.
 
@@ -82,6 +88,9 @@ removed on the next run, and `--uninstall` takes ours back out. `trilium` reads 
 - A skill: `shared/skills/<name>/SKILL.md`, then `./install.sh`.
 - A command or agent: drop a markdown file in `shared/commands/` or `shared/agents/`.
   Frontmatter fields differ between the tools; keep shared files to fields both accept.
+
+Update the Anthropic skills with `git submodule update --remote vendor/anthropic-skills`, then commit
+the new pointer and re-run `./install.sh` (it links new skills and prunes removed ones).
 
 ## Tests
 

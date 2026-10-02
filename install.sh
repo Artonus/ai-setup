@@ -151,6 +151,21 @@ link_children() {
   done <<< "$names"
 }
 
+VENDOR_SKILLS="$REPO/vendor/anthropic-skills/skills"
+
+# link_vendor_skills: link each skill of the anthropics/skills submodule into ~/.claude/skills.
+# A skill of the same name in shared/skills (or the overlay) wins. An uninitialised submodule is skipped.
+link_vendor_skills() {
+  local dir name
+  [ -d "$VENDOR_SKILLS" ] || { log "note: vendor/anthropic-skills is empty (run: git submodule update --init)"; return 0; }
+  for dir in "$VENDOR_SKILLS"/*/; do
+    [ -f "$dir/SKILL.md" ] || continue
+    name="$(basename "$dir")"
+    if [ -n "$(children shared skills | grep -Fx -- "$name" || true)" ]; then continue; fi
+    link "${dir%/}" "$CLAUDE_DIR/skills/$name"
+  done
+}
+
 place_copy() { mkdir -p "$(dirname "$2")" && cp "$1" "$2"; }
 
 # write_generated <tmpfile> <dest>: install a generated regular file (idempotent).
@@ -252,6 +267,7 @@ install_all() {
   link "$(src_for shared AGENTS.md)" "$OPENCODE_DIR/AGENTS.md"
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
   link_children shared skills "$CLAUDE_DIR/skills"
+  link_vendor_skills
   for kind in agents commands; do
     link_children shared "$kind" "$CLAUDE_DIR/$kind"
     link_children shared "$kind" "$OPENCODE_DIR/$(opencode_subdir "$kind")"

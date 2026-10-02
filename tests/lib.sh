@@ -56,6 +56,9 @@ new_env() {
   mkdir -p "$REPO/shared/skills/demo"
   printf '# demo skill\n' > "$REPO/shared/skills/demo/SKILL.md"
   printf 'say hello\n' > "$REPO/shared/commands/hello.md"
+  mkdir -p "$REPO/vendor/anthropic-skills/skills/pdf" "$REPO/vendor/anthropic-skills/skills/xlsx"
+  printf '# pdf skill\n' > "$REPO/vendor/anthropic-skills/skills/pdf/SKILL.md"
+  printf '# xlsx skill\n' > "$REPO/vendor/anthropic-skills/skills/xlsx/SKILL.md"
 }
 
 run_install() { # run_install [install.sh args]: sets RC and OUT

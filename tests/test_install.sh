@@ -128,3 +128,13 @@ test_uninstall_removes_only_our_mcp_servers() {
   assert_eq null "$(jq '.mcpServers.trilium' "$HOME/.claude.json")" "trilium removed"
   assert_eq "https://x.test" "$(jq -r '.mcpServers.mine.url' "$HOME/.claude.json")" "user's server kept"
 }
+
+test_install_links_vendored_anthropic_skills_but_shared_wins() {
+  mkdir -p "$REPO/shared/skills/xlsx"
+  printf '# my xlsx\n' > "$REPO/shared/skills/xlsx/SKILL.md"
+  run_install
+  assert_link "$HOME/.claude/skills/pdf" "$REPO/vendor/anthropic-skills/skills/pdf"
+  assert_link "$HOME/.claude/skills/xlsx" "$REPO/shared/skills/xlsx"
+  run_install --uninstall
+  assert_missing "$HOME/.claude/skills/pdf"
+}
