@@ -31,13 +31,18 @@ settings key.
 - `enabledPlugins`: `superpowers@claude-plugins-official`, `frontend-design@claude-plugins-official`,
   `context7@claude-plugins-official`, all `true`.
 - `permissions.allow` (routine, reversible work):
-  - Read-only: `git status`, `git diff`, `git log`, `git show`, `git branch`, `ls`, `cat`,
-    `grep`, `rg`, `gh pr view`, `gh pr list`, `gh run view`.
-  - Local writes: `git add`, `git commit`, `git checkout`, `git switch`, `git stash`.
+  - Read-only: `git status`, `git diff`, `git log`, `git show`, `git branch --list`,
+    `git branch --show-current`, `ls`, `gh pr view|list`, `gh run view`.
+  - Local writes: `git add`, `git commit`, `git switch`, `git stash push|list`.
   - Tests/lint/build: `npm test`, `npm run test|lint|build`, `pnpm test|lint`, `pytest`,
     `ruff`, `go test`, `cargo test|check`, `bash tests/run.sh`.
-- `permissions.deny`: existing `Read(./.env)`, `Read(./.env.*)`, plus `git push --force`,
-  `git reset --hard`, `rm -rf`, `sudo`, `Read(~/.ssh/**)`, `Read(~/.aws/**)`.
+  - Deliberately absent: `cat`, `grep`, `rg` (Bash bypasses `Read` deny rules, and `rg --pre`
+    runs programs; use the built-in Read/Grep tools), `git checkout`, bare `git stash` and
+    bare `git branch` (can discard work or delete branches).
+- `permissions.deny`: `Read(**/.env)`, `Read(**/.env.*)`, `Read(~/.ssh/**)`, `Read(~/.aws/**)`,
+  `git push --force|-f`, `git reset --hard`, `rm -rf`, `sudo`, `git diff|log|show --output`,
+  `git switch -f|--discard-changes`. Deny rules match one spelling by prefix, so they are
+  best-effort; the prompt for anything not allowed is the real safeguard.
 - Deliberately not allowed (still prompt): `git push`, `gh pr create`, dependency installs,
   anything else that reaches outside the machine.
 - Overlay interaction: arrays are unioned on merge, so an overlay can add deny rules but
