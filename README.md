@@ -55,6 +55,14 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 - `.gitignore` already excludes `overlay/`, `*.local.*`, and `settings.local.json`.
 - Optional: run [gitleaks](https://github.com/gitleaks/gitleaks) (`gitleaks detect`) before pushing.
 
+## MCP servers (OpenCode)
+
+`opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` (OAuth in
+the browser on first use) and `google-calendar`. Google Calendar ships **disabled**: it needs a
+Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
+Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set `"enabled": true` in your
+overlay's `opencode/opencode.json`, then sign in with `opencode mcp auth google-calendar`.
+
 ## Adding things
 
 - A skill: `shared/skills/<name>/SKILL.md`, then `./install.sh`.

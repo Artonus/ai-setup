@@ -8,6 +8,21 @@
       "headers": {
         "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
       }
+    },
+    "todoist": {
+      "type": "remote",
+      "url": "https://ai.todoist.net/mcp",
+      "enabled": true
+    },
+    "google-calendar": {
+      "type": "remote",
+      "url": "https://calendarmcp.googleapis.com/mcp/v1",
+      "enabled": false,
+      "oauth": {
+        "clientId": "{env:GOOGLE_MCP_CLIENT_ID}",
+        "clientSecret": "{env:GOOGLE_MCP_CLIENT_SECRET}",
+        "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/calendar.events.readonly"
+      }
     }
   }
 }

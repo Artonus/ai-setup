@@ -104,3 +104,22 @@ test_layout_agents_md_has_context7_guidance() {
   assert_contains "$a" "resolve-library-id" "AGENTS.md names the resolve step"
   assert_contains "$a" "query-docs" "AGENTS.md names the query step"
 }
+
+test_layout_opencode_declares_todoist_with_automatic_oauth() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.mcp.todoist.type == "remote" and .mcp.todoist.url == "https://ai.todoist.net/mcp" and .mcp.todoist.enabled == true' "$o" >/dev/null; then ok; else fail "todoist MCP not declared"; fi
+  if jq -e '.mcp.todoist | has("headers") | not' "$o" >/dev/null; then ok; else fail "todoist should use OAuth, not headers"; fi
+}
+
+test_layout_opencode_google_calendar_is_off_until_credentials_exist() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.mcp["google-calendar"].type == "remote" and .mcp["google-calendar"].url == "https://calendarmcp.googleapis.com/mcp/v1"' "$o" >/dev/null; then ok; else fail "google-calendar MCP not declared"; fi
+  if jq -e '.mcp["google-calendar"].enabled == false' "$o" >/dev/null; then ok; else fail "google-calendar must default to disabled"; fi
+  if jq -e '.mcp["google-calendar"].oauth.clientId == "{env:GOOGLE_MCP_CLIENT_ID}" and .mcp["google-calendar"].oauth.clientSecret == "{env:GOOGLE_MCP_CLIENT_SECRET}"' "$o" >/dev/null; then ok; else fail "google-calendar OAuth credentials must be {env:} references"; fi
+  if jq -e '.mcp["google-calendar"].oauth.scope | test("calendar.events.readonly")' "$o" >/dev/null; then ok; else fail "google-calendar scopes missing"; fi
+}
+
+test_layout_opencode_mcp_credentials_are_env_references() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.clientId, .clientSecret) | select(. != null))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
+}
