@@ -39,7 +39,9 @@ test_overlay_claude_settings_are_deep_merged() {
   if jq -e '.env.WORK_MODE == "1"' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "overlay env missing"; fi
   if jq -e '.permissions.deny | index("Read(./.env)") != null' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "base deny was lost"; fi
   if jq -e '.permissions.deny | index("Bash(curl:*)") != null' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "overlay deny missing"; fi
-  if jq -e '.permissions.deny | length == 3' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "deny should be a union of 3"; fi
+  local base_n
+  base_n="$(jq '.permissions.deny | length' "$REPO/claude/settings.json")"
+  if jq -e --argjson n "$((base_n + 1))" '.permissions.deny | length == $n' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "deny should be the base rules plus the overlay's one"; fi
 }
 
 test_overlay_opencode_json_is_merged() {
