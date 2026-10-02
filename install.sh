@@ -10,17 +10,19 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ai-setup"
 MANIFEST="$STATE_DIR/manifest"
 STAMP="$(date +%Y%m%d%H%M%S)"
 DRY_RUN=0
+UNINSTALL=0
 CHANGES=0
 NEW_MANIFEST=""
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--dry-run]
+Usage: install.sh [--dry-run] [--uninstall]
 
 Symlinks the shared Claude Code / OpenCode config into ~/.claude and
 ~/.config/opencode. Existing files are backed up, never deleted.
 
   --dry-run    Show what would change; touch nothing.
+  --uninstall  Remove everything a previous run created (backups are kept).
   -h, --help   Show this help.
 EOF
 }
@@ -118,10 +120,34 @@ write_manifest() {
   sort -u "$NEW_MANIFEST" > "$MANIFEST"
 }
 
+# prune_stale: remove links/files a previous run created that this run no longer wants.
+prune_stale() {
+  [ -f "$MANIFEST" ] || return 0
+  local path
+  while IFS= read -r path; do
+    if grep -qxF -- "$path" "$NEW_MANIFEST"; then continue; fi
+    if [ -L "$path" ] || [ -f "$path" ]; then act "remove stale $path" rm -f "$path"; fi
+  done < "$MANIFEST"
+}
+
+# uninstall: remove everything the manifest lists. Backups made earlier are left in place.
+uninstall() {
+  if [ ! -f "$MANIFEST" ]; then
+    log "nothing to uninstall"
+    return 0
+  fi
+  local path
+  while IFS= read -r path; do
+    if [ -L "$path" ] || [ -f "$path" ]; then act "remove $path" rm -f "$path"; fi
+  done < "$MANIFEST"
+  act "remove manifest $MANIFEST" rm -f "$MANIFEST"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case $1 in
       --dry-run) DRY_RUN=1 ;;
+      --uninstall) UNINSTALL=1 ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown option: $1" ;;
     esac
@@ -131,8 +157,13 @@ main() {
   NEW_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/ai-setup.XXXXXX")"
   trap 'rm -f "$NEW_MANIFEST"' EXIT
 
-  install_all
-  write_manifest
+  if [ "$UNINSTALL" = 1 ]; then
+    uninstall
+  else
+    install_all
+    prune_stale
+    write_manifest
+  fi
 
   if [ "$DRY_RUN" = 1 ]; then
     log "ai-setup (dry run): $CHANGES change(s) planned"
