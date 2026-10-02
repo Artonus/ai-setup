@@ -39,7 +39,9 @@ test_layout_settings_deny_dangerous_commands() {
   for r in 'Read(**/.env)' 'Read(**/.env.*)' 'Bash(git push --force:*)' 'Bash(git push -f:*)' \
            'Bash(git reset --hard:*)' 'Bash(rm -rf:*)' 'Bash(sudo:*)' 'Read(~/.ssh/**)' 'Read(~/.aws/**)' \
            'Bash(git diff --output:*)' 'Bash(git log --output:*)' 'Bash(git show --output:*)' \
-           'Bash(git switch -f:*)' 'Bash(git switch --discard-changes:*)'; do
+           'Bash(git switch -f:*)' 'Bash(git switch --discard-changes:*)' \
+           'Bash(rm -fr:*)' 'Bash(rm -r -f:*)' 'Bash(rm --recursive --force:*)' 'Bash(git push --force-with-lease:*)' \
+           'Bash(git commit -a:*)' 'Bash(git commit --amend:*)' 'Bash(git commit --no-verify:*)'; do
     if jq -e --arg r "$r" '.permissions.deny | index($r) != null' "$s" >/dev/null; then ok; else fail "deny missing $r"; fi
   done
   if jq -e '.permissions.deny | (unique | length) == length' "$s" >/dev/null; then ok; else fail "deny has duplicates"; fi
@@ -84,7 +86,7 @@ test_layout_commit_command_has_only_description_frontmatter() {
 
 test_layout_settings_allow_nothing_that_bypasses_read_denies_or_destroys_work() {
   local s="$ROOT/claude/settings.json" r
-  for r in 'Bash(cat:*)' 'Bash(grep:*)' 'Bash(rg:*)' 'Bash(git checkout:*)' 'Bash(git stash:*)' 'Bash(git branch:*)'; do
+  for r in 'Bash(ruff:*)' 'Bash(cat:*)' 'Bash(grep:*)' 'Bash(rg:*)' 'Bash(git checkout:*)' 'Bash(git stash:*)' 'Bash(git branch:*)'; do
     if jq -e --arg r "$r" '.permissions.allow | index($r) == null' "$s" >/dev/null; then ok; else fail "allow must not contain $r"; fi
   done
 }

@@ -10,8 +10,7 @@ gets it from `./install.sh`. Content only: no installer changes.
 ## Non-goals
 
 - OpenCode content (separate pass).
-- The `notes` agent. It is hardcoded to an Obsidian vault at `~/Notes` and will be rewritten
-  or dropped after the Obsidian to Trillium migration (tracked in Todoist). Left unmanaged in
+- The `notes` agent. It is tied to a personal note-taking setup that is changing. Left unmanaged in
   `~/.claude/agents/` until then.
 - Work-specific settings (belong in the private overlay).
 - A permissions model per project; this is the global baseline only.
@@ -35,14 +34,17 @@ settings key.
     `git branch --show-current`, `ls`, `gh pr view|list`, `gh run view`.
   - Local writes: `git add`, `git commit`, `git switch`, `git stash push|list`.
   - Tests/lint/build: `npm test`, `npm run test|lint|build`, `pnpm test|lint`, `pytest`,
-    `ruff`, `go test`, `cargo test|check`, `bash tests/run.sh`.
+    `ruff check`, `go test`, `cargo test|check`, `bash tests/run.sh`.
   - Deliberately absent: `cat`, `grep`, `rg` (Bash bypasses `Read` deny rules, and `rg --pre`
     runs programs; use the built-in Read/Grep tools), `git checkout`, bare `git stash` and
     bare `git branch` (can discard work or delete branches).
 - `permissions.deny`: `Read(**/.env)`, `Read(**/.env.*)`, `Read(~/.ssh/**)`, `Read(~/.aws/**)`,
   `git push --force|-f`, `git reset --hard`, `rm -rf`, `sudo`, `git diff|log|show --output`,
-  `git switch -f|--discard-changes`. Deny rules match one spelling by prefix, so they are
+  `git switch -f|--discard-changes`, common `rm -rf` spellings, `git push --force-with-lease`,
+  `git commit -a|--amend|--no-verify`. Deny rules match one spelling by prefix, so they are
   best-effort; the prompt for anything not allowed is the real safeguard.
+- Accepted risk: test, lint and build commands (`cargo`, `pytest`, `bash tests/run.sh`) run code
+  from the repo, so opening an untrusted repo can execute its code without a prompt.
 - Deliberately not allowed (still prompt): `git push`, `gh pr create`, dependency installs,
   anything else that reaches outside the machine.
 - Overlay interaction: arrays are unioned on merge, so an overlay can add deny rules but

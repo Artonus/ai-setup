@@ -144,3 +144,12 @@ test_overlay_type_mismatch_is_rejected_before_any_change() {
   assert_contains "$OUT" "cannot merge" "error says what is wrong"
   assert_missing "$HOME/.claude"
 }
+
+test_overlay_deny_rule_present_in_base_and_overlay_appears_once() {
+  new_overlay
+  printf '{"permissions":{"deny":["Read(**/.env)"]}}\n' > "$OV/claude/settings.json"
+  run_install
+  local base_n
+  base_n="$(jq '.permissions.deny | length' "$REPO/claude/settings.json")"
+  if jq -e --argjson n "$base_n" '.permissions.deny | length == $n' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "duplicate deny rule was not collapsed"; fi
+}

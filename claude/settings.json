@@ -29,7 +29,7 @@
       "Bash(pnpm test:*)",
       "Bash(pnpm lint:*)",
       "Bash(pytest:*)",
-      "Bash(ruff:*)",
+      "Bash(ruff check:*)",
       "Bash(go test:*)",
       "Bash(cargo test:*)",
       "Bash(cargo check:*)",
@@ -51,7 +51,14 @@
       "Bash(git log --output:*)",
       "Bash(git show --output:*)",
       "Bash(git switch -f:*)",
-      "Bash(git switch --discard-changes:*)"
+      "Bash(git switch --discard-changes:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -r -f:*)",
+      "Bash(rm --recursive --force:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git commit -a:*)",
+      "Bash(git commit --amend:*)",
+      "Bash(git commit --no-verify:*)"
     ]
   }
 }
