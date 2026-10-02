@@ -1,0 +1,5 @@
+overlay/
+*.local.*
+settings.local.json
+.DS_Store
+.superpowers/

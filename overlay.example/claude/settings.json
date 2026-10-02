@@ -1,0 +1,8 @@
+{
+  "env": {
+    "WORK_MODE": "1"
+  },
+  "permissions": {
+    "deny": ["Bash(curl:*)"]
+  }
+}
