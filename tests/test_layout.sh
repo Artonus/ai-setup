@@ -123,3 +123,16 @@ test_layout_opencode_mcp_credentials_are_env_references() {
   local o="$ROOT/opencode/opencode.json"
   if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.clientId, .clientSecret) | select(. != null))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
 }
+
+test_layout_secrets_md_documents_every_env_reference() {
+  local f="$ROOT/SECRETS.md" v vars
+  if [ -f "$f" ]; then ok; else fail "missing SECRETS.md"; return; fi
+  vars="$(grep -o '{env:[A-Za-z0-9_]*}' "$ROOT/opencode/opencode.json" | sed 's/{env:\(.*\)}/\1/' | sort -u)"
+  for v in $vars; do
+    if grep -q "\`$v\`" "$f"; then ok; else fail "SECRETS.md does not document $v"; fi
+  done
+}
+
+test_layout_secrets_md_contains_no_values() {
+  if grep -Eq '(sk-[A-Za-z0-9]{10,}|ctx7sk-|Bearer [A-Za-z0-9._-]{20,})' "$ROOT/SECRETS.md" 2>/dev/null; then fail "SECRETS.md looks like it contains a real key"; else ok; fi
+}
