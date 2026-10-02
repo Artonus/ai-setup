@@ -55,3 +55,25 @@ test_install_rejects_unknown_option() {
   if [ "$RC" != 0 ]; then ok; else fail "unknown option should fail"; fi
   assert_contains "$OUT" "unknown option" "error names the problem"
 }
+
+test_install_backs_up_user_file_that_replaced_our_link() {
+  run_install
+  rm "$HOME/.claude/settings.json"
+  printf '{"model":"mine"}\n' > "$HOME/.claude/settings.json"
+  run_install
+  assert_link "$HOME/.claude/settings.json" "$REPO/claude/settings.json"
+  assert_eq 1 "$(count_backups "$HOME/.claude/settings.json")" "user's file was backed up"
+  local b
+  for b in "$HOME/.claude/settings.json".bak.*; do
+    assert_eq '{"model":"mine"}' "$(cat "$b")" "backup keeps the user's content"
+  done
+}
+
+test_install_leaves_symlinked_dir_alone_when_repo_has_nothing_to_link() {
+  mkdir -p "$HOME/.claude" "$T/my-agents"
+  printf 'a\n' > "$T/my-agents/a.md"
+  ln -s "$T/my-agents" "$HOME/.claude/agents"
+  run_install
+  assert_link "$HOME/.claude/agents" "$T/my-agents"
+  assert_eq 0 "$(count_backups "$HOME/.claude/agents")" "no backup of the user's agents dir"
+}

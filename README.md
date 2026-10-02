@@ -28,6 +28,8 @@ Requires bash and, only when you use an overlay with JSON configs, `jq`.
 Files already in the way are moved to `<name>.bak.<timestamp>`, never deleted. The installer
 records what it created in `~/.local/state/ai-setup/manifest`, so re-running is a no-op,
 links for entries you deleted from the repo are pruned, and `--uninstall` touches nothing else.
+Anything you changed since (a file put in place of one of our links, an edited generated config)
+is no longer "ours": it is backed up on install and left alone by prune and uninstall.
 
 ## Work overlay
 

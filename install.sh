@@ -22,6 +22,8 @@ MERGE_JQ='def merge($a; $b):
       .[$k] = (if has($k) then merge(.[$k]; $b[$k]) else $b[$k] end))
   elif ($a|type) == "array" and ($b|type) == "array" then
     reduce $b[] as $x ($a; if index([$x]) == null then . + [$x] else . end)
+  elif ($a|type) == "array" or ($a|type) == "object" then
+    error("type mismatch: base is \($a|type), overlay is \($b|type)")
   else $b end;
 merge(.[0]; .[1])'
 
@@ -58,11 +60,33 @@ act() {
   fi
 }
 
-# owned <path>: true when a previous run created <path>.
-owned() { [ -f "$MANIFEST" ] && grep -qxF -- "$1" "$MANIFEST"; }
+# Manifest lines are "<path><TAB><what we put there>": "l:<link target>" or "f:<cksum of file>".
+file_sum() { cksum < "$1" | awk '{print $1 "-" $2}'; }
 
-# record <path>: remember that this run manages <path> (also in dry-run, so pruning can be planned).
-record() { printf '%s\n' "$1" >> "$NEW_MANIFEST"; }
+# lookup <path> <manifest-file>: print <path>'s recorded field; fails when <path> is not listed.
+lookup() {
+  [ -f "$2" ] || return 1
+  P="$1" awk -F'\t' '$1 == ENVIRON["P"] { print $2; f = 1; exit } END { exit !f }' "$2"
+}
+
+# still_ours <path> <field>: <path> is still exactly what a previous run put there.
+still_ours() {
+  case $2 in
+    l:*) [ -L "$1" ] && [ "$(readlink "$1")" = "${2#l:}" ] ;;
+    f:*) [ -f "$1" ] && [ ! -L "$1" ] && [ "$(file_sum "$1")" = "${2#f:}" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# owned <path>: true when a previous run created <path> and nobody has changed it since.
+owned() {
+  local field
+  field="$(lookup "$1" "$MANIFEST")" || return 1
+  still_ours "$1" "$field"
+}
+
+# record <path> <field>: remember what this run put at <path> (also in dry-run, so pruning can be planned).
+record() { printf '%s\t%s\n' "$1" "$2" >> "$NEW_MANIFEST"; }
 
 # clear_dest <path>: make room at <path>. Our own old output is removed; anything else is backed up.
 clear_dest() {
@@ -80,7 +104,7 @@ make_link() { mkdir -p "$(dirname "$2")" && ln -s "$1" "$2"; }
 # link <src> <dest>: idempotent symlink with backup of whatever is in the way.
 link() {
   local src=$1 dest=$2
-  record "$dest"
+  record "$dest" "l:$src"
   if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then return 0; fi
   clear_dest "$dest"
   act "link $dest -> $src" make_link "$src" "$dest"
@@ -115,13 +139,14 @@ children() {
 
 # link_children <area> <kind> <destdir>: link every entry of <area>/<kind> into <destdir>.
 link_children() {
-  local name
+  local name names
+  names="$(children "$1" "$2")"
+  [ -n "$names" ] || return 0
   # A symlinked target dir would make us write through it into somewhere else.
   if [ -L "$3" ]; then clear_dest "$3"; fi
   while IFS= read -r name; do
-    [ -n "$name" ] || continue
     link "$(src_for "$1" "$2/$name")" "$3/$name"
-  done < <(children "$1" "$2")
+  done <<< "$names"
 }
 
 place_copy() { mkdir -p "$(dirname "$2")" && cp "$1" "$2"; }
@@ -129,7 +154,7 @@ place_copy() { mkdir -p "$(dirname "$2")" && cp "$1" "$2"; }
 # write_generated <tmpfile> <dest>: install a generated regular file (idempotent).
 write_generated() {
   local tmp=$1 dest=$2
-  record "$dest"
+  record "$dest" "f:$(file_sum "$tmp")"
   if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$tmp" "$dest"; then return 0; fi
   clear_dest "$dest"
   act "write $dest (merged with overlay)" place_copy "$tmp" "$dest"
@@ -155,11 +180,15 @@ install_json() {
 preflight_overlay() {
   [ -n "${AI_SETUP_OVERLAY:-}" ] || return 0
   [ -d "$AI_SETUP_OVERLAY" ] || die "AI_SETUP_OVERLAY is not a directory: $AI_SETUP_OVERLAY"
+  AI_SETUP_OVERLAY="$(cd "$AI_SETUP_OVERLAY" && pwd -P)"
   local f
   for f in claude/settings.json opencode/opencode.json; do
     [ -f "$AI_SETUP_OVERLAY/$f" ] || continue
     command -v jq >/dev/null 2>&1 || die "jq is required to merge $f from the overlay"
-    jq empty "$AI_SETUP_OVERLAY/$f" >/dev/null 2>&1 || die "invalid JSON in overlay: $AI_SETUP_OVERLAY/$f"
+    jq -e 'type == "object"' "$AI_SETUP_OVERLAY/$f" >/dev/null 2>&1 \
+      || die "invalid JSON in overlay (expected an object): $AI_SETUP_OVERLAY/$f"
+    jq -s "$MERGE_JQ" "$REPO/$f" "$AI_SETUP_OVERLAY/$f" >/dev/null 2>&1 \
+      || die "cannot merge overlay $f into the base (type mismatch, or invalid base JSON)"
   done
 }
 
@@ -186,10 +215,14 @@ write_manifest() {
 # prune_stale: remove links/files a previous run created that this run no longer wants.
 prune_stale() {
   [ -f "$MANIFEST" ] || return 0
-  local path
-  while IFS= read -r path; do
-    if grep -qxF -- "$path" "$NEW_MANIFEST"; then continue; fi
-    if [ -L "$path" ] || [ -f "$path" ]; then act "remove stale $path" rm -f "$path"; fi
+  local path field
+  while IFS=$'\t' read -r path field; do
+    if lookup "$path" "$NEW_MANIFEST" >/dev/null; then continue; fi
+    if still_ours "$path" "$field"; then
+      act "remove stale $path" rm -f "$path"
+    elif [ -e "$path" ] || [ -L "$path" ]; then
+      log "keeping $path: it is no longer what ai-setup installed"
+    fi
   done < "$MANIFEST"
 }
 
@@ -199,9 +232,13 @@ uninstall() {
     log "nothing to uninstall"
     return 0
   fi
-  local path
-  while IFS= read -r path; do
-    if [ -L "$path" ] || [ -f "$path" ]; then act "remove $path" rm -f "$path"; fi
+  local path field
+  while IFS=$'\t' read -r path field; do
+    if still_ours "$path" "$field"; then
+      act "remove $path" rm -f "$path"
+    elif [ -e "$path" ] || [ -L "$path" ]; then
+      log "keeping $path: it is no longer what ai-setup installed"
+    fi
   done < "$MANIFEST"
   act "remove manifest $MANIFEST" rm -f "$MANIFEST"
 }

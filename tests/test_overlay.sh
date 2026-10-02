@@ -93,3 +93,52 @@ test_overlay_merged_json_dry_run_writes_nothing() {
   assert_contains "$OUT" "would write" "dry run reports the merged file"
   assert_missing "$HOME/.claude/settings.json"
 }
+
+test_overlay_edited_generated_file_is_backed_up_not_lost() {
+  new_overlay
+  printf '{"env":{"WORK_MODE":"1"}}\n' > "$OV/claude/settings.json"
+  run_install
+  printf '{"edited":true}\n' > "$HOME/.claude/settings.json"
+  run_install
+  assert_eq 1 "$(count_backups "$HOME/.claude/settings.json")" "the edit survives as a backup"
+  local b
+  for b in "$HOME/.claude/settings.json".bak.*; do
+    assert_eq '{"edited":true}' "$(cat "$b")" "backup keeps the edit"
+  done
+  if jq -e '.env.WORK_MODE == "1"' "$HOME/.claude/settings.json" >/dev/null; then ok; else fail "merged file was not regenerated"; fi
+}
+
+test_overlay_relative_path_is_made_absolute() {
+  new_overlay
+  printf 'work\n' > "$OV/shared/AGENTS.md"
+  RC=0
+  OUT="$(cd "$T" && AI_SETUP_OVERLAY="work overlay" bash "$REPO/install.sh" 2>&1)" || RC=$?
+  assert_eq 0 "$RC" "relative overlay path works"
+  assert_link "$HOME/.claude/AGENTS.md" "$OV/shared/AGENTS.md"
+}
+
+test_overlay_empty_json_file_is_rejected() {
+  new_overlay
+  : > "$OV/claude/settings.json"
+  run_install
+  if [ "$RC" != 0 ]; then ok; else fail "empty overlay JSON should fail"; fi
+  assert_missing "$HOME/.claude"
+}
+
+test_overlay_non_object_json_is_rejected() {
+  new_overlay
+  printf '[]\n' > "$OV/claude/settings.json"
+  run_install
+  if [ "$RC" != 0 ]; then ok; else fail "array overlay JSON should fail"; fi
+  assert_contains "$OUT" "expected an object" "error says what is wrong"
+  assert_missing "$HOME/.claude"
+}
+
+test_overlay_type_mismatch_is_rejected_before_any_change() {
+  new_overlay
+  printf '{"permissions":{"deny":"x"}}\n' > "$OV/claude/settings.json"
+  run_install
+  if [ "$RC" != 0 ]; then ok; else fail "type mismatch should fail"; fi
+  assert_contains "$OUT" "cannot merge" "error says what is wrong"
+  assert_missing "$HOME/.claude"
+}

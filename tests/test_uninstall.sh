@@ -33,3 +33,23 @@ test_install_prunes_links_for_removed_entries() {
   assert_missing "$HOME/.config/opencode/skills/demo"
   assert_link "$HOME/.claude/CLAUDE.md" "$REPO/claude/CLAUDE.md"
 }
+
+test_uninstall_keeps_file_the_user_put_in_place_of_ours() {
+  run_install
+  rm "$HOME/.claude/settings.json"
+  printf '{"model":"mine"}\n' > "$HOME/.claude/settings.json"
+  run_install --uninstall
+  assert_file "$HOME/.claude/settings.json"
+  assert_eq '{"model":"mine"}' "$(cat "$HOME/.claude/settings.json")" "user's file untouched"
+  assert_missing "$HOME/.claude/CLAUDE.md"
+}
+
+test_install_prune_keeps_user_replacement_of_stale_link() {
+  run_install
+  rm "$HOME/.claude/skills/demo"
+  mkdir "$HOME/.claude/skills/demo"
+  printf 'mine\n' > "$HOME/.claude/skills/demo/SKILL.md"
+  rm -rf "$REPO/shared/skills/demo"
+  run_install
+  assert_file "$HOME/.claude/skills/demo/SKILL.md"
+}
