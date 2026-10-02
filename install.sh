@@ -8,6 +8,8 @@ CLAUDE_DIR="$HOME/.claude"
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ai-setup"
 MANIFEST="$STATE_DIR/manifest"
+CLAUDE_JSON="$HOME/.claude.json"
+MCP_STATE="$STATE_DIR/mcp-servers"
 STAMP="$(date +%Y%m%d%H%M%S)"
 DRY_RUN=0
 UNINSTALL=0
@@ -176,14 +178,63 @@ install_json() {
   rm -f "$tmp"
 }
 
+# Claude Code reads user-scope MCP servers from ~/.claude.json (not settings.json), a file it also
+# writes itself. So we never link it: we merge the servers from claude/mcp.json (plus the overlay's)
+# into its "mcpServers" key and remember the names in $MCP_STATE for pruning and uninstall.
+
+# mcp_desired: print the merged claude/mcp.json (base + overlay), or nothing when there is none.
+mcp_desired() {
+  local over=""
+  [ -f "$REPO/claude/mcp.json" ] || return 0
+  if [ -n "${AI_SETUP_OVERLAY:-}" ] && [ -f "$AI_SETUP_OVERLAY/claude/mcp.json" ]; then
+    over="$AI_SETUP_OVERLAY/claude/mcp.json"
+  fi
+  if [ -n "$over" ]; then jq -s "$MERGE_JQ" "$REPO/claude/mcp.json" "$over"; else cat "$REPO/claude/mcp.json"; fi
+}
+
+# mcp_rewrite <new-json> <names>: replace ~/.claude.json atomically (one backup) and record the names.
+mcp_rewrite() {
+  local tmp="$CLAUDE_JSON.ai-setup.$$"
+  if [ -f "$CLAUDE_JSON" ]; then cp "$CLAUDE_JSON" "$CLAUDE_JSON.bak.$STAMP"; fi
+  cp "$1" "$tmp" && mv "$tmp" "$CLAUDE_JSON"
+  if [ -n "$2" ]; then
+    mkdir -p "$STATE_DIR" && printf '%s\n' "$2" > "$MCP_STATE"
+  else
+    rm -f "$MCP_STATE"
+  fi
+}
+
+# sync_mcp <desired-json|"">: make ~/.claude.json's mcpServers hold exactly our servers on top of
+# whatever else is there; servers we added earlier but no longer declare are removed.
+sync_mcp() {
+  local want=$1 cur new names old tmp
+  [ -n "$want" ] || [ -f "$MCP_STATE" ] || return 0
+  [ -n "$want" ] || want='{}'
+  cur='{}'
+  if [ -f "$CLAUDE_JSON" ]; then cur="$(cat "$CLAUDE_JSON")"; fi
+  names="$(printf '%s' "$want" | jq -r '(.mcpServers // {}) | keys[]')"
+  old="$(cat "$MCP_STATE" 2>/dev/null || true)"
+  new="$(jq -n --argjson c "$cur" --argjson w "$want" --arg old "$old" '
+    ($old | split("\n") | map(select(. != ""))) as $o
+    | $c | .mcpServers = ((((.mcpServers // {}) | del(.[$o[]])) ) + ($w.mcpServers // {}))
+    | if .mcpServers == {} then del(.mcpServers) else . end')"
+  if [ "$(printf '%s' "$new" | jq -S .)" = "$(printf '%s' "$cur" | jq -S .)" ] \
+     && [ "$names" = "$old" ]; then return 0; fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/ai-setup-mcp.XXXXXX")"
+  printf '%s\n' "$new" > "$tmp"
+  act "update MCP servers in $CLAUDE_JSON" mcp_rewrite "$tmp" "$names"
+  rm -f "$tmp"
+}
+
 # preflight_overlay: fail early, before any change, on a bad overlay.
 preflight_overlay() {
   [ -n "${AI_SETUP_OVERLAY:-}" ] || return 0
   [ -d "$AI_SETUP_OVERLAY" ] || die "AI_SETUP_OVERLAY is not a directory: $AI_SETUP_OVERLAY"
   AI_SETUP_OVERLAY="$(cd "$AI_SETUP_OVERLAY" && pwd -P)"
   local f
-  for f in claude/settings.json opencode/opencode.json; do
+  for f in claude/settings.json claude/mcp.json opencode/opencode.json; do
     [ -f "$AI_SETUP_OVERLAY/$f" ] || continue
+    [ -f "$REPO/$f" ] || continue
     command -v jq >/dev/null 2>&1 || die "jq is required to merge $f from the overlay"
     jq -e 'type == "object"' "$AI_SETUP_OVERLAY/$f" >/dev/null 2>&1 \
       || die "invalid JSON in overlay (expected an object): $AI_SETUP_OVERLAY/$f"
@@ -197,6 +248,7 @@ install_all() {
   link "$(src_for shared AGENTS.md)" "$CLAUDE_DIR/AGENTS.md"
   link "$(src_for claude CLAUDE.md)" "$CLAUDE_DIR/CLAUDE.md"
   install_json claude settings.json "$CLAUDE_DIR/settings.json"
+  sync_mcp "$(mcp_desired)"
   link "$(src_for shared AGENTS.md)" "$OPENCODE_DIR/AGENTS.md"
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
   link_children shared skills "$CLAUDE_DIR/skills"
@@ -228,6 +280,7 @@ prune_stale() {
 
 # uninstall: remove everything the manifest lists. Backups made earlier are left in place.
 uninstall() {
+  uninstall_mcp
   if [ ! -f "$MANIFEST" ]; then
     log "nothing to uninstall"
     return 0
@@ -241,6 +294,12 @@ uninstall() {
     fi
   done < "$MANIFEST"
   act "remove manifest $MANIFEST" rm -f "$MANIFEST"
+}
+
+# uninstall_mcp: take our servers back out of ~/.claude.json.
+uninstall_mcp() {
+  [ -f "$MCP_STATE" ] || return 0
+  if [ -f "$CLAUDE_JSON" ]; then sync_mcp '{}'; else rm -f "$MCP_STATE"; fi
 }
 
 main() {

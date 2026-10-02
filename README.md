@@ -58,7 +58,8 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 ## MCP servers (OpenCode)
 
 `opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` (OAuth in
-the browser on first use) and `google-calendar`. Google Calendar ships **disabled**: it needs a
+the browser on first use), `trilium` (trilium.example.com, token from `TRILIUM_MCP_TOKEN`) and
+`google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set `"enabled": true` in your
 overlay's `opencode/opencode.json`, then sign in with `opencode mcp auth google-calendar`.
@@ -69,6 +70,12 @@ overlay's `opencode/opencode.json`, then sign in with `opencode mcp auth google-
 branch (no version pin), so an upstream change reaches your sessions on the next OpenCode
 start. To pin, append a tag: `...superpowers.git#v6.4.2`. This targets OpenCode V1 (`plugin`);
 on V2 the key is `plugins`. Verify by asking OpenCode: "Tell me about your superpowers".
+
+Claude Code reads user-scope MCP servers from `~/.claude.json`, not `settings.json`, so
+`install.sh` merges `claude/mcp.json` (and the overlay's copy) into that file's `mcpServers`.
+Your other servers and Claude Code's own state are left alone; servers removed from the repo are
+removed on the next run, and `--uninstall` takes ours back out. `trilium` reads its token from
+`${TRILIUM_MCP_TOKEN}`, expanded by Claude Code at startup.
 
 ## Adding things
 

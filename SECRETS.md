@@ -12,6 +12,7 @@ Work-only variables live in the private overlay's own `SECRETS.md`.
 | Variable | Used by | Needed? | How to get it |
 |---|---|---|---|
 | `CONTEXT7_API_KEY` | `context7` MCP | Recommended (higher rate limits) | Create a key in your Context7 account dashboard |
+| `TRILIUM_MCP_TOKEN` | `trilium` MCP (OpenCode and Claude Code) | Yes, to use it | Trilium ETAPI token (Options > ETAPI > Create new token) |
 | `GOOGLE_MCP_CLIENT_ID` | `google-calendar` MCP | Only to enable it | Google Cloud OAuth client (web application) |
 | `GOOGLE_MCP_CLIENT_SECRET` | `google-calendar` MCP | Only to enable it | Same OAuth client |
 | `ANTHROPIC_API_KEY` | Anthropic models in OpenCode | Only if you use Claude there | Claude Console. Subscriptions cannot be used. Alternatively run `opencode auth login` |
@@ -28,12 +29,12 @@ your overlay, then run `opencode mcp auth google-calendar`.
 
 ## Claude Code
 
-Nothing to export for the base setup. The `context7` plugin and the claude.ai connectors
+Export `TRILIUM_MCP_TOKEN` (see above) for the `trilium` MCP; nothing else for the base setup. The `context7` plugin and the claude.ai connectors
 (Todoist, Google Calendar) authenticate inside Claude Code (`/mcp`) or in claude.ai settings.
 
 ## Check it
 
 ```bash
 opencode mcp list     # shows each server and whether it connected or needs auth
-env | grep -c -E '^(CONTEXT7_API_KEY|ANTHROPIC_API_KEY)='   # counts set variables, prints no values
+env | grep -c -E '^(CONTEXT7_API_KEY|TRILIUM_MCP_TOKEN|ANTHROPIC_API_KEY)='   # counts set variables, prints no values
 ```

@@ -1,6 +1,6 @@
 test_layout_required_files_exist() {
   local f
-  for f in shared/AGENTS.md claude/CLAUDE.md claude/settings.json opencode/opencode.json \
+  for f in shared/AGENTS.md claude/CLAUDE.md claude/settings.json claude/mcp.json opencode/opencode.json \
            shared/skills/.gitkeep shared/agents/.gitkeep shared/commands/.gitkeep \
            overlay.example/README.md .gitignore; do
     if [ -e "$ROOT/$f" ]; then ok; else fail "missing $f"; fi
@@ -9,7 +9,7 @@ test_layout_required_files_exist() {
 
 test_layout_json_configs_are_valid() {
   local f
-  for f in claude/settings.json opencode/opencode.json \
+  for f in claude/settings.json claude/mcp.json opencode/opencode.json \
            overlay.example/claude/settings.json overlay.example/opencode/opencode.json; do
     if jq empty "$ROOT/$f" >/dev/null 2>&1; then ok; else fail "$f is not valid JSON"; fi
   done
@@ -141,4 +141,16 @@ test_layout_opencode_installs_superpowers_plugin_v1_style() {
   local o="$ROOT/opencode/opencode.json"
   if jq -e '.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$o" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugin"; fi
   if jq -e 'has("plugins") | not' "$o" >/dev/null; then ok; else fail "OpenCode V1 uses .plugin, not .plugins"; fi
+}
+
+test_layout_opencode_declares_trilium_with_env_bearer_token() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.mcp.trilium.type == "remote" and .mcp.trilium.url == "https://trilium.example.com/mcp" and .mcp.trilium.enabled == true' "$o" >/dev/null; then ok; else fail "trilium MCP not declared"; fi
+  if jq -e '.mcp.trilium.headers.Authorization == "Bearer {env:TRILIUM_MCP_TOKEN}"' "$o" >/dev/null; then ok; else fail "trilium must use an env bearer token"; fi
+}
+
+test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {
+  local m="$ROOT/claude/mcp.json"
+  if jq -e '.mcpServers.trilium.type == "http" and .mcpServers.trilium.url == "https://trilium.example.com/mcp"' "$m" >/dev/null; then ok; else fail "trilium not declared in claude/mcp.json"; fi
+  if jq -e '[.mcpServers[].headers // {} | to_entries[].value] | all(test("^Bearer \\$\\{[A-Z0-9_]+\\}$"))' "$m" >/dev/null; then ok; else fail "claude MCP header is not a \${VAR} reference"; fi
 }

@@ -14,6 +14,14 @@
       "url": "https://ai.todoist.net/mcp",
       "enabled": true
     },
+    "trilium": {
+      "type": "remote",
+      "url": "https://trilium.example.com/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
+      }
+    },
     "google-calendar": {
       "type": "remote",
       "url": "https://calendarmcp.googleapis.com/mcp/v1",

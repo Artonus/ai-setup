@@ -85,3 +85,46 @@ test_install_commit_command_linked_into_both_tools_and_idempotent() {
   run_install
   assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
 }
+
+test_install_merges_mcp_servers_into_claude_json_keeping_the_rest() {
+  printf '{"numStartups": 7, "mcpServers": {"mine": {"type": "http", "url": "https://x.test"}}}\n' > "$HOME/.claude.json"
+  run_install
+  assert_eq 0 "$RC" "install exits 0"
+  assert_eq 7 "$(jq '.numStartups' "$HOME/.claude.json")" "unrelated state is kept"
+  assert_eq "https://x.test" "$(jq -r '.mcpServers.mine.url' "$HOME/.claude.json")" "user's own server is kept"
+  assert_eq "https://trilium.example.com/mcp" "$(jq -r '.mcpServers.trilium.url' "$HOME/.claude.json")" "trilium is added"
+  assert_eq 'Bearer ${TRILIUM_MCP_TOKEN}' "$(jq -r '.mcpServers.trilium.headers.Authorization' "$HOME/.claude.json")" "token stays an env reference"
+  assert_file "$HOME/.claude.json"
+}
+
+test_install_creates_claude_json_when_missing_and_is_idempotent() {
+  run_install
+  assert_eq "http" "$(jq -r '.mcpServers.trilium.type' "$HOME/.claude.json")" "trilium written to a new file"
+  run_install
+  assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
+  assert_eq 0 "$(count_backups "$HOME/.claude.json")" "no backup when the file did not exist or did not change"
+}
+
+test_install_dry_run_leaves_claude_json_alone() {
+  printf '{"a": 1}\n' > "$HOME/.claude.json"
+  run_install --dry-run
+  assert_contains "$OUT" "would update MCP servers" "dry run reports the merge"
+  assert_eq '{"a": 1}' "$(cat "$HOME/.claude.json")" "file untouched"
+}
+
+test_install_removes_mcp_servers_it_no_longer_declares() {
+  run_install
+  jq '.mcpServers.extra = {"type":"http","url":"https://extra.test"}' "$HOME/.claude.json" > "$T/c.json" && mv "$T/c.json" "$HOME/.claude.json"
+  printf '{"mcpServers": {}}\n' > "$REPO/claude/mcp.json"
+  run_install
+  assert_eq null "$(jq '.mcpServers.trilium' "$HOME/.claude.json")" "dropped server is removed"
+  assert_eq "https://extra.test" "$(jq -r '.mcpServers.extra.url' "$HOME/.claude.json")" "servers we never added are kept"
+}
+
+test_uninstall_removes_only_our_mcp_servers() {
+  printf '{"mcpServers": {"mine": {"type": "http", "url": "https://x.test"}}}\n' > "$HOME/.claude.json"
+  run_install
+  run_install --uninstall
+  assert_eq null "$(jq '.mcpServers.trilium' "$HOME/.claude.json")" "trilium removed"
+  assert_eq "https://x.test" "$(jq -r '.mcpServers.mine.url' "$HOME/.claude.json")" "user's server kept"
+}
