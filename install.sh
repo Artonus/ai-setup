@@ -86,10 +86,10 @@ link() {
   act "link $dest -> $src" make_link "$src" "$dest"
 }
 
-# OpenCode directory name for each shared kind (checked against the OpenCode docs in Task 5).
+# OpenCode directory name for each shared kind. Skills are not listed: OpenCode reads
+# ~/.claude/skills itself. Plural names confirmed against docs.opencode.ai (Task 5).
 opencode_subdir() {
   case $1 in
-    skills) echo skills ;;
     agents) echo agents ;;
     commands) echo commands ;;
     *) die "unknown kind: $1" ;;
@@ -170,7 +170,8 @@ install_all() {
   install_json claude settings.json "$CLAUDE_DIR/settings.json"
   link "$(src_for shared AGENTS.md)" "$OPENCODE_DIR/AGENTS.md"
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
-  for kind in skills agents commands; do
+  link_children shared skills "$CLAUDE_DIR/skills"
+  for kind in agents commands; do
     link_children shared "$kind" "$CLAUDE_DIR/$kind"
     link_children shared "$kind" "$OPENCODE_DIR/$(opencode_subdir "$kind")"
   done

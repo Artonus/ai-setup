@@ -8,7 +8,7 @@ test_install_links_claude_and_opencode_files() {
   assert_link "$HOME/.claude/commands/hello.md" "$REPO/shared/commands/hello.md"
   assert_link "$HOME/.config/opencode/AGENTS.md" "$REPO/shared/AGENTS.md"
   assert_link "$HOME/.config/opencode/opencode.json" "$REPO/opencode/opencode.json"
-  assert_link "$HOME/.config/opencode/skills/demo" "$REPO/shared/skills/demo"
+  assert_missing "$HOME/.config/opencode/skills" # OpenCode reads ~/.claude/skills itself
   assert_link "$HOME/.config/opencode/commands/hello.md" "$REPO/shared/commands/hello.md"
 }
 

@@ -19,7 +19,7 @@ test_overlay_adds_entries_next_to_base_entries() {
   printf '# work\n' > "$OV/shared/skills/work-only/SKILL.md"
   run_install
   assert_link "$HOME/.claude/skills/work-only" "$OV/shared/skills/work-only"
-  assert_link "$HOME/.config/opencode/skills/work-only" "$OV/shared/skills/work-only"
+  assert_missing "$HOME/.config/opencode/skills" # OpenCode reads ~/.claude/skills itself
   assert_link "$HOME/.claude/skills/demo" "$REPO/shared/skills/demo"
 }
 
