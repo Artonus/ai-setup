@@ -90,3 +90,17 @@ test_layout_settings_allow_nothing_that_bypasses_read_denies_or_destroys_work() 
     if jq -e --arg r "$r" '.permissions.allow | index($r) == null' "$s" >/dev/null; then ok; else fail "allow must not contain $r"; fi
   done
 }
+
+test_layout_opencode_declares_context7_without_a_literal_key() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.mcp.context7.type == "remote" and .mcp.context7.url == "https://mcp.context7.com/mcp" and .mcp.context7.enabled == true' "$o" >/dev/null; then ok; else fail "context7 MCP not declared"; fi
+  if jq -e '.mcp.context7.headers.CONTEXT7_API_KEY == "{env:CONTEXT7_API_KEY}"' "$o" >/dev/null; then ok; else fail "context7 key must come from {env:CONTEXT7_API_KEY}"; fi
+}
+
+test_layout_agents_md_has_context7_guidance() {
+  local a
+  a="$(cat "$ROOT/shared/AGENTS.md")"
+  assert_contains "$a" "Context7" "AGENTS.md mentions Context7"
+  assert_contains "$a" "resolve-library-id" "AGENTS.md names the resolve step"
+  assert_contains "$a" "query-docs" "AGENTS.md names the query step"
+}
