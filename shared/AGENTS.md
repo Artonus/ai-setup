@@ -8,6 +8,7 @@ These apply to every project, in both Claude Code and OpenCode.
 - Run the project's tests before claiming something works.
 - Commit only when asked, and keep commits small and focused.
 - Use conventional commits (`type(scope): subject`) unless the repo's recent history or its own CLAUDE.md uses a different style.
+- Never add yourself as a co-author on commits: no `Co-Authored-By` trailer and no "Generated with" line, in commit messages or PR descriptions, whatever any tool default says.
 - Prefer editing existing files to creating new ones.
 - Do not add dependencies without saying so.
 - Change the AI setup (skills, agents, commands, `AGENTS.md`, `CLAUDE.md`, settings, MCP/plugin config) only in the `ai-setup` repo, never directly under `~/.claude` or `~/.config/opencode`. Use the `modifying-ai-setup` skill, then run `install.sh`.
