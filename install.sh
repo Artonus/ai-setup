@@ -139,10 +139,14 @@ children() {
   } | grep -v '^\.gitkeep$' | sort -u || true
 }
 
-# link_children <area> <kind> <destdir>: link every entry of <area>/<kind> into <destdir>.
+# link_children <area> <kind> <destdir> [<winning-area>]: link every entry of <area>/<kind> into
+# <destdir>, skipping names that <winning-area>/<kind> also has (that area links them instead).
 link_children() {
   local name names
   names="$(children "$1" "$2")"
+  if [ -n "${4:-}" ]; then
+    names="$(printf '%s\n' "$names" | grep -vxF -f <(children "$4" "$2") || true)"
+  fi
   [ -n "$names" ] || return 0
   # A symlinked target dir would make us write through it into somewhere else.
   if [ -L "$3" ]; then clear_dest "$3"; fi
@@ -270,7 +274,12 @@ install_all() {
   link_vendor_skills
   for kind in agents commands; do
     link_children shared "$kind" "$CLAUDE_DIR/$kind"
-    link_children shared "$kind" "$OPENCODE_DIR/$(opencode_subdir "$kind")"
+    link_children shared "$kind" "$OPENCODE_DIR/$(opencode_subdir "$kind")" opencode
+  done
+  # OpenCode-only entries (OpenCode frontmatter, or tools only OpenCode has). They win over a
+  # same-named shared entry in ~/.config/opencode.
+  for kind in skills agents commands; do
+    link_children opencode "$kind" "$OPENCODE_DIR/$kind"
   done
 }
 

@@ -138,3 +138,20 @@ test_install_links_vendored_anthropic_skills_but_shared_wins() {
   run_install --uninstall
   assert_missing "$HOME/.claude/skills/pdf"
 }
+
+test_install_opencode_only_entries_skip_claude() {
+  mkdir -p "$REPO/opencode/skills/oc-skill" "$REPO/opencode/agents" "$REPO/opencode/commands"
+  printf '# oc\n' > "$REPO/opencode/skills/oc-skill/SKILL.md"
+  printf 'oc agent\n' > "$REPO/opencode/agents/oc-agent.md"
+  printf 'oc hello\n' > "$REPO/opencode/commands/hello.md"
+  run_install
+  assert_link "$HOME/.config/opencode/skills/oc-skill" "$REPO/opencode/skills/oc-skill"
+  assert_link "$HOME/.config/opencode/agents/oc-agent.md" "$REPO/opencode/agents/oc-agent.md"
+  assert_missing "$HOME/.claude/skills/oc-skill"
+  assert_missing "$HOME/.claude/agents/oc-agent.md"
+  # A same-named OpenCode-only command wins in OpenCode; Claude keeps the shared one.
+  assert_link "$HOME/.config/opencode/commands/hello.md" "$REPO/opencode/commands/hello.md"
+  assert_link "$HOME/.claude/commands/hello.md" "$REPO/shared/commands/hello.md"
+  run_install
+  assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
+}

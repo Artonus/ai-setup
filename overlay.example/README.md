@@ -11,6 +11,8 @@ The overlay mirrors the base layout: `shared/`, `claude/`, `opencode/`.
 - A file with the same name as a base file replaces it.
 - New entries in `shared/skills|agents|commands/` are added next to the base ones;
   an entry with the same name replaces the base entry.
+- `opencode/skills|agents|commands/` hold OpenCode-only entries (for example a skill for an MCP
+  server only OpenCode has); they are linked into `~/.config/opencode` and never into `~/.claude`.
 - `claude/settings.json` and `opencode/opencode.json` are deep-merged into the base:
   objects are merged, arrays are unioned, overlay scalars win.
 - Never put secrets in the overlay either. Reference environment variables:

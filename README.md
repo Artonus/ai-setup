@@ -13,7 +13,7 @@ this repo.
 | `vendor/anthropic-skills/` | Git submodule of [anthropics/skills](https://github.com/anthropics/skills); each skill in it is linked into `~/.claude/skills` too (a same-named skill in `shared/skills/` wins) |
 | `shared/agents/`, `shared/commands/` | One file per agent / command, linked into both tools |
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
-| `opencode/` | `opencode.json` |
+| `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install

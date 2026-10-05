@@ -160,3 +160,15 @@ test_overlay_plugin_arrays_are_unioned_with_base() {
   run_install
   if jq -e '.plugin | index("work-plugin@1.0.0") != null and index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "base and overlay plugins should both be present"; fi
 }
+
+test_overlay_opencode_only_skill_is_linked_only_into_opencode() {
+  new_overlay
+  mkdir -p "$OV/opencode/skills/work-docs"
+  printf '# work docs\n' > "$OV/opencode/skills/work-docs/SKILL.md"
+  run_install
+  assert_link "$HOME/.config/opencode/skills/work-docs" "$OV/opencode/skills/work-docs"
+  assert_missing "$HOME/.claude/skills/work-docs"
+  unset AI_SETUP_OVERLAY
+  run_install
+  assert_missing "$HOME/.config/opencode/skills/work-docs"
+}
