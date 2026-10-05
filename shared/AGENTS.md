@@ -34,3 +34,11 @@ When the Trilium tools are available, use them as persistent memory. The `Memory
 - **Update, don't duplicate.** Search before storing. If a memory exists but is outdated or wrong, edit that note; delete it only if it no longer applies.
 - **Do not store** trivia, anything already stored, temporary debugging output, secrets or credentials.
 - Ask before deleting a memory note.
+
+## Notes (Trilium)
+
+When the Trilium tools are available, the user's knowledge base is there too. Memory is facts for you; notes are knowledge the user will read later. Save notes proactively, without being asked, following the `trilium-notes` skill:
+
+- **Save** research results or a technical explanation worth rereading, a non-obvious problem and its solution, a comparison or decision with its reasoning, a how-to or setup steps you worked out, and ideas that came up on the way.
+- **Skip** trivia, code that already lives in a repo, and anything already noted (search first; update the existing note instead of duplicating it). Never store secrets.
+- **Place** the note under the best-fitting existing parent by your best guess; do not ask. Then tell the user in one line what you saved and where.
