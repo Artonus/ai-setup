@@ -33,6 +33,24 @@
       }
     }
   },
+  "permission": {
+    "skill": {
+      "context7-mcp": "deny",
+      "diagnose": "deny",
+      "find-skills": "deny",
+      "grill-me": "deny",
+      "grill-with-docs": "deny",
+      "handoff": "deny",
+      "improve-codebase-architecture": "deny",
+      "setup-matt-pocock-skills": "deny",
+      "tdd": "deny",
+      "to-issues": "deny",
+      "to-prd": "deny",
+      "triage": "deny",
+      "write-a-skill": "deny",
+      "zoom-out": "deny"
+    }
+  },
   "plugin": [
     "superpowers@git+https://github.com/obra/superpowers.git"
   ]

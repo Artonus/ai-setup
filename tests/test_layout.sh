@@ -28,7 +28,7 @@ test_layout_gitignore_covers_private_files() {
 
 test_layout_settings_declare_defaults_and_plugins() {
   local s="$ROOT/claude/settings.json" p
-  if jq -e '.model == "sonnet" and .tui == "fullscreen"' "$s" >/dev/null; then ok; else fail "model/tui not set"; fi
+  if jq -e '.model == "opus" and .tui == "fullscreen"' "$s" >/dev/null; then ok; else fail "model/tui not set"; fi
   for p in superpowers frontend-design context7; do
     if jq -e --arg p "$p@claude-plugins-official" '.enabledPlugins[$p] == true' "$s" >/dev/null; then ok; else fail "plugin $p not enabled"; fi
   done
