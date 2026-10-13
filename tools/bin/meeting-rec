@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+mkdir -p ~/recordings
+
+SINK=$(pactl get-default-sink)
+MIC=""
+MIC_GAIN=2.5   # tuned for the USB mic
+
+# Bluetooth headset: find the input that belongs to the same device as the output
+if [[ "$SINK" == bluez_output.* ]]; then
+  BT_ID=$(echo "$SINK" | sed -E 's/^bluez_output\.([^.]+).*/\1/')
+  find_bt_mic() { pactl list sources short | awk '{print $2}' | grep -m1 "^bluez_input\.$BT_ID"; }
+  MIC=$(find_bt_mic)
+  if [ -z "$MIC" ]; then
+    # Headset is in music mode (A2DP) and has no mic: switch to the call profile
+    pactl set-card-profile "bluez_card.$BT_ID" headset-head-unit 2>/dev/null
+    sleep 2
+    SINK=$(pactl get-default-sink)
+    MIC=$(find_bt_mic)
+  fi
+  MIC_GAIN=1.5   # starting guess for Bluetooth, adjust after a test
+fi
+
+# Not Bluetooth (or no BT mic found): use the default source, skipping monitors
+if [ -z "$MIC" ]; then
+  MIC=$(pactl get-default-source)
+  if [[ "$MIC" == *.monitor ]]; then
+    MIC=$(pactl list sources short | awk '{print $2}' | grep -v '\.monitor$' | head -n1)
+  fi
+fi
+
+OUT=~/recordings/meeting-$(date +%F-%H%M).wav
+echo "Output: $SINK.monitor"
+echo "Mic:    $MIC"
+echo "File:   $OUT"
+echo "Recording... press Ctrl+C to stop."
+
+# Keep this script alive on Ctrl+C so ffmpeg can finish writing the WAV properly
+trap ':' INT
+
+/usr/bin/ffmpeg -hide_banner -loglevel warning -stats \
+  -thread_queue_size 1024 -f pulse -i "$SINK.monitor" \
+  -thread_queue_size 1024 -f pulse -i "$MIC" \
+  -filter_complex "[0:a]aformat=channel_layouts=mono,volume=0.7,dynaudnorm=f=250:g=15[a];[1:a]aformat=channel_layouts=mono,volume=${MIC_GAIN},dynaudnorm=f=250:g=15[b];[a][b]join=inputs=2:channel_layout=stereo" \
+  -ar 16000 -y "$OUT"   # stereo: left = remote side (speaker output), right = me (mic)
+
+echo
+echo "Saved: $OUT"
+notify-send "Meeting recording" "Saved: $(basename "$OUT")" 2>/dev/null

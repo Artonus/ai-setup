@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+SP=$(echo ~/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3*/site-packages)
+export LD_LIBRARY_PATH="$SP/nvidia/cublas/lib:$SP/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
+
+REC=${MEETING_REC_DIR:-~/recordings}
+NOTES=${MEETING_NOTES_DIR:-~/notes}
+LOG="$NOTES/.transcribe.log"
+mkdir -p "$REC" "$NOTES"
+
+# whisper <input> <output-dir> <format> [extra args]: GPU first, CPU if that produced nothing
+whisper() {
+  local in="$1" dir="$2" fmt="$3" out
+  shift 3
+  out="$dir/$(basename "${in%.wav}").$fmt"
+  # turbo + int8 + batching fits the 4 GB GPU; large-v3 in float16 failed on long meetings
+  whisper-ctranslate2 "$in" --model large-v3-turbo --language pl --device cuda \
+    --compute_type int8_float16 --batched True --batch_size 8 --vad_filter True \
+    --output_format "$fmt" --output_dir "$dir" "$@" 2>>"$LOG"
+  if [ ! -s "$out" ]; then
+    echo "CUDA run produced no transcript, retrying on CPU (see $LOG)" >&2
+    whisper-ctranslate2 "$in" --model large-v3-turbo --language pl --device cpu \
+      --compute_type int8 --vad_filter True \
+      --output_format "$fmt" --output_dir "$dir" "$@" 2>>"$LOG"
+  fi
+  [ -s "$out" ]
+}
+
+transcribe() {
+  local f="$1" base tmp ok
+  base=$(basename "${f%.wav}")
+  # Old recordings are one mixed mono track
+  if [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of csv=p=0 "$f")" != 2 ]; then
+    whisper "$f" "$NOTES" txt
+    return
+  fi
+  # Stereo from meeting-rec: left = remote side, right = me. Transcribe each, then interleave.
+  tmp=$(mktemp -d)
+  ffmpeg -loglevel error -i "$f" -filter_complex "channelsplit=channel_layout=stereo[l][r]" \
+    -map "[l]" "$tmp/remote.wav" -map "[r]" "$tmp/me.wav"
+  # A silent track yields no JSON; treat it as empty rather than as a failure
+  whisper "$tmp/remote.wav" "$tmp" json --word_timestamps True || echo '{"segments": []}' > "$tmp/remote.json"
+  whisper "$tmp/me.wav" "$tmp" json --word_timestamps True || echo '{"segments": []}' > "$tmp/me.json"
+  python3 "$LIB/merge-tracks.py" Remote "$tmp/remote.json" Me "$tmp/me.json" > "$tmp/$base.txt" \
+    && [ -s "$tmp/$base.txt" ] && mv "$tmp/$base.txt" "$NOTES/$base.txt"
+  ok=$?
+  rm -rf "$tmp"
+  return $ok
+}
+
+process_pending() {
+  local f base
+  for f in "$REC"/meeting-*.wav; do
+    [ -e "$f" ] || continue
+    base=$(basename "${f%.wav}")
+    [ -s "$NOTES/$base.txt" ] && continue                 # already transcribed
+    pgrep -f "ffmpeg.*$base" >/dev/null && continue      # still being recorded
+    transcribe "$f" && notify-send "Transcript ready" "$base.txt"
+  done
+}
+
+while true; do
+  process_pending
+  # Wake on a finished recording, or every 60 s as a safety net
+  inotifywait -qq -t 60 -e close_write "$REC"
+done

@@ -281,6 +281,8 @@ install_all() {
   for kind in skills agents commands; do
     link_children opencode "$kind" "$OPENCODE_DIR/$kind"
   done
+  # Helper scripts (e.g. the meeting recorder), linked into ~/bin, which must be on PATH.
+  link_children tools bin "$HOME/bin"
 }
 
 write_manifest() {

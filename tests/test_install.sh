@@ -156,3 +156,11 @@ test_install_opencode_only_entries_skip_claude() {
   run_install
   assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
 }
+
+test_install_links_tools_into_home_bin_and_uninstall_removes_them() {
+  run_install
+  assert_link "$HOME/bin/meeting-rec" "$REPO/tools/bin/meeting-rec"
+  assert_link "$HOME/bin/meeting-transcribe" "$REPO/tools/bin/meeting-transcribe"
+  run_install --uninstall
+  assert_missing "$HOME/bin/meeting-rec"
+}
