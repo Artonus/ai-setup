@@ -84,6 +84,15 @@ test_layout_commit_command_has_only_description_frontmatter() {
   assert_contains "$(cat "$f")" "conventional" "commit command defaults to conventional commits"
 }
 
+test_layout_meeting_notes_agent_has_shared_frontmatter() {
+  local f="$ROOT/shared/agents/meeting-notes.md" keys
+  if [ -f "$f" ]; then ok; else fail "missing shared/agents/meeting-notes.md"; return; fi
+  assert_eq "---" "$(sed -n 1p "$f")" "frontmatter opens on line 1"
+  keys="$(awk 'NR==1{next} /^---$/{exit} {print}' "$f" | sed 's/:.*//' | sort -u | tr '\n' ' ')"
+  assert_eq "description name " "$keys" "frontmatter has only name and description (both tools accept them)"
+  assert_contains "$(cat "$f")" "name: meeting-notes" "agent name matches the filename"
+}
+
 test_layout_settings_allow_nothing_that_bypasses_read_denies_or_destroys_work() {
   local s="$ROOT/claude/settings.json" r
   for r in 'Bash(ruff:*)' 'Bash(cat:*)' 'Bash(grep:*)' 'Bash(rg:*)' 'Bash(git checkout:*)' 'Bash(git stash:*)' 'Bash(git branch:*)'; do

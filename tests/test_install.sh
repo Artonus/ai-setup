@@ -70,6 +70,7 @@ test_install_backs_up_user_file_that_replaced_our_link() {
 }
 
 test_install_leaves_symlinked_dir_alone_when_repo_has_nothing_to_link() {
+  rm -f "$REPO/shared/agents/"*.md
   mkdir -p "$HOME/.claude" "$T/my-agents"
   printf 'a\n' > "$T/my-agents/a.md"
   ln -s "$T/my-agents" "$HOME/.claude/agents"
