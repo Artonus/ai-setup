@@ -46,10 +46,10 @@ test_overlay_claude_settings_are_deep_merged() {
 
 test_overlay_opencode_json_is_merged() {
   new_overlay
-  printf '{"mcp":{"work":{"type":"remote","url":"https://mcp.example.com"}}}\n' > "$OV/opencode/opencode.json"
+  printf '{"mcp":{"servers":{"work":{"type":"remote","url":"https://mcp.example.com"}}}}\n' > "$OV/opencode/opencode.json"
   run_install
   assert_file "$HOME/.config/opencode/opencode.json"
-  if jq -e '.mcp.work.type == "remote" and (.["$schema"] != null)' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "opencode merge wrong"; fi
+  if jq -e '.mcp.servers.work.type == "remote" and .mcp.servers.context7 != null and (.["$schema"] != null)' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "opencode merge wrong"; fi
 }
 
 test_overlay_merged_json_rerun_is_idempotent() {
@@ -156,9 +156,9 @@ test_overlay_deny_rule_present_in_base_and_overlay_appears_once() {
 
 test_overlay_plugin_arrays_are_unioned_with_base() {
   new_overlay
-  printf '{"plugin":["work-plugin@1.0.0"]}\n' > "$OV/opencode/opencode.json"
+  printf '{"plugins":["work-plugin@1.0.0"]}\n' > "$OV/opencode/opencode.json"
   run_install
-  if jq -e '.plugin | index("work-plugin@1.0.0") != null and index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "base and overlay plugins should both be present"; fi
+  if jq -e '.plugins | index("work-plugin@1.0.0") != null and index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$HOME/.config/opencode/opencode.json" >/dev/null; then ok; else fail "base and overlay plugins should both be present"; fi
 }
 
 test_overlay_opencode_only_skill_is_linked_only_into_opencode() {

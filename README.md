@@ -68,15 +68,16 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 the browser on first use), `trilium` (trilium.example.com, token from `TRILIUM_MCP_TOKEN`) and
 `google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
-Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set `"enabled": true` in your
-overlay's `opencode/opencode.json`, then sign in with `opencode mcp auth google-calendar`.
+Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set
+`mcp.servers.google-calendar.disabled` to `false` in your overlay's `opencode/opencode.json`,
+then sign in with `opencode mcp auth google-calendar`.
 
 ## OpenCode plugins
 
 `superpowers` is installed through OpenCode's plugin list and tracks the upstream `main`
 branch (no version pin), so an upstream change reaches your sessions on the next OpenCode
-start. To pin, append a tag: `...superpowers.git#v6.4.2`. This targets OpenCode V1 (`plugin`);
-on V2 the key is `plugins`. Verify by asking OpenCode: "Tell me about your superpowers".
+start. To pin, append a tag: `...superpowers.git#v7.0.0` (V2 needs `v6.4.1` or later). Verify
+by asking OpenCode: "Tell me about your superpowers".
 
 Claude Code reads user-scope MCP servers from `~/.claude.json`, not `settings.json`, so
 `install.sh` merges `claude/mcp.json` (and the overlay's copy) into that file's `mcpServers`.
@@ -103,14 +104,17 @@ Runs the installer against a throwaway `$HOME` with paths containing spaces. Nee
 
 ## Notes
 
-Checked against the official docs (2026-10-02):
+Checked against the official docs (2026-10-02; OpenCode V2 on 2026-10-16):
 
+- `opencode/opencode.json` uses the OpenCode V2 shape: `mcp.servers.<name>` with `disabled`,
+  snake_case OAuth fields, an ordered `permissions` array (last match wins) and `plugins`.
+  `opencode debug config` shows how OpenCode reads the installed file.
 - OpenCode's global config directory is `~/.config/opencode/`, with plural subdirectory
   names (`agents/`, `commands/`, `skills/`); singular names still work for compatibility.
 - OpenCode also loads skills from `~/.claude/skills/`, so skills are linked only there to
   avoid duplicates.
-- OpenCode falls back to `~/.claude/CLAUDE.md` only when `~/.config/opencode/AGENTS.md` is
-  missing; the installer always provides `AGENTS.md`.
+- OpenCode V2 reads only `AGENTS.md`, never `CLAUDE.md`; the installer always provides
+  `~/.config/opencode/AGENTS.md`, so Claude-only notes in `claude/CLAUDE.md` stay out of OpenCode.
 - Claude Code resolves `@~/.claude/AGENTS.md` imports from the home directory, which is why
   `claude/CLAUDE.md` uses that path rather than a relative one (it is installed as a symlink).
 - In Claude Cowork desktop sessions, a symlinked `~/.claude/CLAUDE.md` is skipped by design.

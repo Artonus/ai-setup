@@ -102,8 +102,8 @@ test_layout_settings_allow_nothing_that_bypasses_read_denies_or_destroys_work() 
 
 test_layout_opencode_declares_context7_without_a_literal_key() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.mcp.context7.type == "remote" and .mcp.context7.url == "https://mcp.context7.com/mcp" and .mcp.context7.enabled == true' "$o" >/dev/null; then ok; else fail "context7 MCP not declared"; fi
-  if jq -e '.mcp.context7.headers.CONTEXT7_API_KEY == "{env:CONTEXT7_API_KEY}"' "$o" >/dev/null; then ok; else fail "context7 key must come from {env:CONTEXT7_API_KEY}"; fi
+  if jq -e '.mcp.servers.context7.type == "remote" and .mcp.servers.context7.url == "https://mcp.context7.com/mcp" and .mcp.servers.context7.disabled == false' "$o" >/dev/null; then ok; else fail "context7 MCP not declared"; fi
+  if jq -e '.mcp.servers.context7.headers.CONTEXT7_API_KEY == "{env:CONTEXT7_API_KEY}"' "$o" >/dev/null; then ok; else fail "context7 key must come from {env:CONTEXT7_API_KEY}"; fi
 }
 
 test_layout_agents_md_has_context7_guidance() {
@@ -116,21 +116,21 @@ test_layout_agents_md_has_context7_guidance() {
 
 test_layout_opencode_declares_todoist_with_automatic_oauth() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.mcp.todoist.type == "remote" and .mcp.todoist.url == "https://ai.todoist.net/mcp" and .mcp.todoist.enabled == true' "$o" >/dev/null; then ok; else fail "todoist MCP not declared"; fi
-  if jq -e '.mcp.todoist | has("headers") | not' "$o" >/dev/null; then ok; else fail "todoist should use OAuth, not headers"; fi
+  if jq -e '.mcp.servers.todoist.type == "remote" and .mcp.servers.todoist.url == "https://ai.todoist.net/mcp" and .mcp.servers.todoist.disabled == false' "$o" >/dev/null; then ok; else fail "todoist MCP not declared"; fi
+  if jq -e '.mcp.servers.todoist | has("headers") | not' "$o" >/dev/null; then ok; else fail "todoist should use OAuth, not headers"; fi
 }
 
 test_layout_opencode_google_calendar_is_off_until_credentials_exist() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.mcp["google-calendar"].type == "remote" and .mcp["google-calendar"].url == "https://calendarmcp.googleapis.com/mcp/v1"' "$o" >/dev/null; then ok; else fail "google-calendar MCP not declared"; fi
-  if jq -e '.mcp["google-calendar"].enabled == false' "$o" >/dev/null; then ok; else fail "google-calendar must default to disabled"; fi
-  if jq -e '.mcp["google-calendar"].oauth.clientId == "{env:GOOGLE_MCP_CLIENT_ID}" and .mcp["google-calendar"].oauth.clientSecret == "{env:GOOGLE_MCP_CLIENT_SECRET}"' "$o" >/dev/null; then ok; else fail "google-calendar OAuth credentials must be {env:} references"; fi
-  if jq -e '.mcp["google-calendar"].oauth.scope | test("calendar.events.readonly")' "$o" >/dev/null; then ok; else fail "google-calendar scopes missing"; fi
+  if jq -e '.mcp.servers["google-calendar"].type == "remote" and .mcp.servers["google-calendar"].url == "https://calendarmcp.googleapis.com/mcp/v1"' "$o" >/dev/null; then ok; else fail "google-calendar MCP not declared"; fi
+  if jq -e '.mcp.servers["google-calendar"].disabled == true' "$o" >/dev/null; then ok; else fail "google-calendar must default to disabled"; fi
+  if jq -e '.mcp.servers["google-calendar"].oauth.client_id == "{env:GOOGLE_MCP_CLIENT_ID}" and .mcp.servers["google-calendar"].oauth.client_secret == "{env:GOOGLE_MCP_CLIENT_SECRET}"' "$o" >/dev/null; then ok; else fail "google-calendar OAuth credentials must be {env:} references"; fi
+  if jq -e '.mcp.servers["google-calendar"].oauth.scope | test("calendar.events.readonly")' "$o" >/dev/null; then ok; else fail "google-calendar scopes missing"; fi
 }
 
 test_layout_opencode_mcp_credentials_are_env_references() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.clientId, .clientSecret) | select(. != null))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
+  if jq -e '[.mcp.servers[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.client_id, .client_secret) | select(. != null))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
 }
 
 test_layout_secrets_md_documents_every_env_reference() {
@@ -146,16 +146,30 @@ test_layout_secrets_md_contains_no_values() {
   if grep -Eq '(sk-[A-Za-z0-9]{10,}|ctx7sk-|Bearer [A-Za-z0-9._-]{20,})' "$ROOT/SECRETS.md" 2>/dev/null; then fail "SECRETS.md looks like it contains a real key"; else ok; fi
 }
 
-test_layout_opencode_installs_superpowers_plugin_v1_style() {
+test_layout_opencode_installs_superpowers_plugin() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$o" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugin"; fi
-  if jq -e 'has("plugins") | not' "$o" >/dev/null; then ok; else fail "OpenCode V1 uses .plugin, not .plugins"; fi
+  if jq -e '.plugins | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$o" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugins"; fi
+}
+
+test_layout_opencode_configs_use_v2_keys_only() {
+  local o
+  for o in "$ROOT/opencode/opencode.json" "$ROOT/overlay.example/opencode/opencode.json"; do
+    if jq -e '(has("permission") or has("plugin") or has("provider") or has("tools") or has("agent") or has("command")) | not' "$o" >/dev/null; then ok; else fail "$o has a V1 top-level key"; fi
+    if jq -e '(.mcp // {}) | keys - ["servers"] | length == 0' "$o" >/dev/null; then ok; else fail "$o declares an MCP server outside .mcp.servers"; fi
+    if jq -e '[(.mcp.servers // {})[] | has("enabled")] | any | not' "$o" >/dev/null; then ok; else fail "$o uses V1 .enabled instead of .disabled"; fi
+  done
+}
+
+test_layout_opencode_skill_denies_are_v2_permission_rules() {
+  local o="$ROOT/opencode/opencode.json"
+  if jq -e '.permissions | type == "array" and all(.action and .resource and (.effect | IN("allow", "ask", "deny")))' "$o" >/dev/null; then ok; else fail "permissions must be an array of {action, resource, effect}"; fi
+  if jq -e '[.permissions[] | select(.action == "skill" and .resource == "tdd" and .effect == "deny")] | length == 1' "$o" >/dev/null; then ok; else fail "skill deny rules missing"; fi
 }
 
 test_layout_opencode_declares_trilium_with_env_bearer_token() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.mcp.trilium.type == "remote" and .mcp.trilium.url == "https://trilium.example.com/mcp" and .mcp.trilium.enabled == true' "$o" >/dev/null; then ok; else fail "trilium MCP not declared"; fi
-  if jq -e '.mcp.trilium.headers.Authorization == "Bearer {env:TRILIUM_MCP_TOKEN}"' "$o" >/dev/null; then ok; else fail "trilium must use an env bearer token"; fi
+  if jq -e '.mcp.servers.trilium.type == "remote" and .mcp.servers.trilium.url == "https://trilium.example.com/mcp" and .mcp.servers.trilium.disabled == false' "$o" >/dev/null; then ok; else fail "trilium MCP not declared"; fi
+  if jq -e '.mcp.servers.trilium.headers.Authorization == "Bearer {env:TRILIUM_MCP_TOKEN}"' "$o" >/dev/null; then ok; else fail "trilium must use an env bearer token"; fi
 }
 
 test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {

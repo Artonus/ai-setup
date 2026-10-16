@@ -18,8 +18,9 @@ Work-only variables live in the private overlay's own `SECRETS.md`.
 | `ANTHROPIC_API_KEY` | Anthropic models in OpenCode | Only if you use Claude there | Claude Console. Subscriptions cannot be used. Alternatively run `opencode auth login` |
 
 Google Calendar setup (it ships disabled): enable the Calendar API and Calendar MCP API in a
-Cloud project, create a web OAuth client, export the two variables, set `"enabled": true` in
-your overlay, then run `opencode mcp auth google-calendar`.
+Cloud project, create a web OAuth client, export the two variables, set
+`mcp.servers.google-calendar.disabled` to `false` in your overlay, then run
+`opencode mcp auth google-calendar`.
 
 ## Browser sign-ins (no variable)
 

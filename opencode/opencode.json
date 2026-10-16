@@ -1,57 +1,57 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "context7": {
-      "type": "remote",
-      "url": "https://mcp.context7.com/mcp",
-      "enabled": true,
-      "headers": {
-        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
-      }
-    },
-    "todoist": {
-      "type": "remote",
-      "url": "https://ai.todoist.net/mcp",
-      "enabled": true
-    },
-    "trilium": {
-      "type": "remote",
-      "url": "https://trilium.example.com/mcp",
-      "enabled": true,
-      "headers": {
-        "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
-      }
-    },
-    "google-calendar": {
-      "type": "remote",
-      "url": "https://calendarmcp.googleapis.com/mcp/v1",
-      "enabled": false,
-      "oauth": {
-        "clientId": "{env:GOOGLE_MCP_CLIENT_ID}",
-        "clientSecret": "{env:GOOGLE_MCP_CLIENT_SECRET}",
-        "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/calendar.events.readonly"
+    "servers": {
+      "context7": {
+        "type": "remote",
+        "url": "https://mcp.context7.com/mcp",
+        "disabled": false,
+        "headers": {
+          "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+        }
+      },
+      "todoist": {
+        "type": "remote",
+        "url": "https://ai.todoist.net/mcp",
+        "disabled": false
+      },
+      "trilium": {
+        "type": "remote",
+        "url": "https://trilium.example.com/mcp",
+        "disabled": false,
+        "headers": {
+          "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
+        }
+      },
+      "google-calendar": {
+        "type": "remote",
+        "url": "https://calendarmcp.googleapis.com/mcp/v1",
+        "disabled": true,
+        "oauth": {
+          "client_id": "{env:GOOGLE_MCP_CLIENT_ID}",
+          "client_secret": "{env:GOOGLE_MCP_CLIENT_SECRET}",
+          "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/calendar.events.readonly"
+        }
       }
     }
   },
-  "permission": {
-    "skill": {
-      "context7-mcp": "deny",
-      "diagnose": "deny",
-      "find-skills": "deny",
-      "grill-me": "deny",
-      "grill-with-docs": "deny",
-      "handoff": "deny",
-      "improve-codebase-architecture": "deny",
-      "setup-matt-pocock-skills": "deny",
-      "tdd": "deny",
-      "to-issues": "deny",
-      "to-prd": "deny",
-      "triage": "deny",
-      "write-a-skill": "deny",
-      "zoom-out": "deny"
-    }
-  },
-  "plugin": [
+  "permissions": [
+    { "action": "skill", "resource": "context7-mcp", "effect": "deny" },
+    { "action": "skill", "resource": "diagnose", "effect": "deny" },
+    { "action": "skill", "resource": "find-skills", "effect": "deny" },
+    { "action": "skill", "resource": "grill-me", "effect": "deny" },
+    { "action": "skill", "resource": "grill-with-docs", "effect": "deny" },
+    { "action": "skill", "resource": "handoff", "effect": "deny" },
+    { "action": "skill", "resource": "improve-codebase-architecture", "effect": "deny" },
+    { "action": "skill", "resource": "setup-matt-pocock-skills", "effect": "deny" },
+    { "action": "skill", "resource": "tdd", "effect": "deny" },
+    { "action": "skill", "resource": "to-issues", "effect": "deny" },
+    { "action": "skill", "resource": "to-prd", "effect": "deny" },
+    { "action": "skill", "resource": "triage", "effect": "deny" },
+    { "action": "skill", "resource": "write-a-skill", "effect": "deny" },
+    { "action": "skill", "resource": "zoom-out", "effect": "deny" }
+  ],
+  "plugins": [
     "superpowers@git+https://github.com/obra/superpowers.git"
   ]
 }
