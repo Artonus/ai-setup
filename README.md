@@ -14,7 +14,7 @@ this repo.
 | `shared/agents/`, `shared/commands/` | One file per agent / command, linked into both tools |
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
-| `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `meeting-rec` records a meeting into `~/recordings` (stereo: left = remote side, right = your mic), `meeting-transcribe` watches that folder and writes Whisper transcripts to `~/notes`, labelling turns `Me:` / `Remote:` |
+| `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`); empty here, the overlay can add its own |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install

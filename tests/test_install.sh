@@ -158,9 +158,10 @@ test_install_opencode_only_entries_skip_claude() {
 }
 
 test_install_links_tools_into_home_bin_and_uninstall_removes_them() {
+  printf '#!/bin/sh\n' > "$REPO/tools/bin/demo-tool"
   run_install
-  assert_link "$HOME/bin/meeting-rec" "$REPO/tools/bin/meeting-rec"
-  assert_link "$HOME/bin/meeting-transcribe" "$REPO/tools/bin/meeting-transcribe"
+  assert_link "$HOME/bin/demo-tool" "$REPO/tools/bin/demo-tool"
+  assert_missing "$HOME/bin/.gitkeep"
   run_install --uninstall
-  assert_missing "$HOME/bin/meeting-rec"
+  assert_missing "$HOME/bin/demo-tool"
 }

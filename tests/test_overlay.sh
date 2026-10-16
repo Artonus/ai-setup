@@ -23,6 +23,17 @@ test_overlay_adds_entries_next_to_base_entries() {
   assert_link "$HOME/.claude/skills/demo" "$REPO/shared/skills/demo"
 }
 
+test_overlay_tools_and_agents_are_linked() {
+  new_overlay
+  mkdir -p "$OV/tools/bin" "$OV/shared/agents"
+  printf '#!/bin/sh\n' > "$OV/tools/bin/work-tool"
+  printf 'work agent\n' > "$OV/shared/agents/work-agent.md"
+  run_install
+  assert_link "$HOME/bin/work-tool" "$OV/tools/bin/work-tool"
+  assert_link "$HOME/.claude/agents/work-agent.md" "$OV/shared/agents/work-agent.md"
+  assert_link "$HOME/.config/opencode/agents/work-agent.md" "$OV/shared/agents/work-agent.md"
+}
+
 test_overlay_entry_overrides_same_named_base_entry() {
   new_overlay
   mkdir -p "$OV/shared/skills/demo"
