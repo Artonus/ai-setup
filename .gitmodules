@@ -1,3 +1,6 @@
 [submodule "vendor/anthropic-skills"]
 	path = vendor/anthropic-skills
 	url = https://github.com/anthropics/skills.git
+[submodule "vendor/mattpocock-skills"]
+	path = vendor/mattpocock-skills
+	url = https://github.com/mattpocock/skills.git

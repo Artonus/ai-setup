@@ -140,6 +140,15 @@ test_install_links_vendored_anthropic_skills_but_shared_wins() {
   assert_missing "$HOME/.claude/skills/pdf"
 }
 
+test_install_links_matt_pocock_skills_from_stable_categories_only() {
+  run_install
+  assert_link "$HOME/.claude/skills/to-tickets" "$REPO/vendor/mattpocock-skills/skills/engineering/to-tickets"
+  assert_missing "$HOME/.claude/skills/draft"
+  assert_missing "$HOME/.claude/skills/tdd"
+  run_install --uninstall
+  assert_missing "$HOME/.claude/skills/to-tickets"
+}
+
 test_install_opencode_only_entries_skip_claude() {
   mkdir -p "$REPO/opencode/skills/oc-skill" "$REPO/opencode/agents" "$REPO/opencode/commands"
   printf '# oc\n' > "$REPO/opencode/skills/oc-skill/SKILL.md"

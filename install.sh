@@ -170,6 +170,27 @@ link_vendor_skills() {
   done
 }
 
+MATT_SKILLS="$REPO/vendor/mattpocock-skills/skills"
+# Skipped because superpowers (or the built-in /code-review) already covers them.
+MATT_SKIP="tdd diagnosing-bugs code-review writing-for-agents implement implement-spec"
+
+# link_matt_skills: link the skills of the mattpocock/skills submodule into ~/.claude/skills.
+# They sit one level down, in category folders; only the stable ones are linked (not
+# in-progress, deprecated or misc). Same precedence rules as link_vendor_skills.
+link_matt_skills() {
+  local dir name category
+  [ -d "$MATT_SKILLS" ] || { log "note: vendor/mattpocock-skills is empty (run: git submodule update --init)"; return 0; }
+  for category in engineering productivity; do
+    for dir in "$MATT_SKILLS/$category"/*/; do
+      [ -f "$dir/SKILL.md" ] || continue
+      name="$(basename "$dir")"
+      case " $MATT_SKIP " in *" $name "*) continue ;; esac
+      if [ -n "$(children shared skills | grep -Fx -- "$name" || true)" ]; then continue; fi
+      link "${dir%/}" "$CLAUDE_DIR/skills/$name"
+    done
+  done
+}
+
 place_copy() { mkdir -p "$(dirname "$2")" && cp "$1" "$2"; }
 
 # write_generated <tmpfile> <dest>: install a generated regular file (idempotent).
@@ -272,6 +293,7 @@ install_all() {
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
   link_children shared skills "$CLAUDE_DIR/skills"
   link_vendor_skills
+  link_matt_skills
   for kind in agents commands; do
     link_children shared "$kind" "$CLAUDE_DIR/$kind"
     link_children shared "$kind" "$OPENCODE_DIR/$(opencode_subdir "$kind")" opencode

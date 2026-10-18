@@ -172,3 +172,7 @@ test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {
 test_layout_anthropic_skills_is_a_submodule() {
   if grep -q 'vendor/anthropic-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "anthropic skills submodule not declared"; fi
 }
+
+test_layout_matt_pocock_skills_is_a_submodule() {
+  if grep -q 'vendor/mattpocock-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "mattpocock skills submodule not declared"; fi
+}

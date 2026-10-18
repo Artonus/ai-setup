@@ -13,6 +13,7 @@ this repo.
 | `vendor/anthropic-skills/` | Git submodule of [anthropics/skills](https://github.com/anthropics/skills); each skill in it is linked into `~/.claude/skills` too (a same-named skill in `shared/skills/` wins) |
 | `shared/agents/`, `shared/commands/` | One file per agent / command, linked into both tools |
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
+| `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
 | `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`); empty here, the overlay can add its own |
 | `overlay.example/` | Template for a private work overlay |
@@ -91,7 +92,7 @@ removed on the next run, and `--uninstall` takes ours back out. `trilium` reads 
 - A command or agent: drop a markdown file in `shared/commands/` or `shared/agents/`.
   Frontmatter fields differ between the tools; keep shared files to fields both accept.
 
-Update the Anthropic skills with `git submodule update --remote vendor/anthropic-skills`, then commit
+Update the vendored skills with `git submodule update --remote vendor/anthropic-skills vendor/mattpocock-skills`, then commit
 the new pointer and re-run `./install.sh` (it links new skills and prunes removed ones).
 
 ## Tests
