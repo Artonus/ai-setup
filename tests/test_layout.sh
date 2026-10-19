@@ -184,3 +184,12 @@ test_layout_kilo_config_is_v1_with_superpowers_and_env_credentials() {
   if jq -e '(has("plugins") or has("permissions") or has("providers")) | not' "$k" >/dev/null; then ok; else fail "kilo/kilo.json has a V2 top-level key"; fi
   if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.environment // {}) | to_entries[].value | select(test("KEY|TOKEN|PAT|SECRET"; "i")))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$k" >/dev/null; then ok; else fail "a Kilo MCP credential is not an {env:VAR} reference"; fi
 }
+
+test_layout_matt_workflow_skills_are_not_switched_off() {
+  local s="$ROOT/claude/settings.json" o="$ROOT/opencode/opencode.json" k="$ROOT/kilo/kilo.json" n
+  for n in grill-with-docs grill-me handoff improve-codebase-architecture setup-matt-pocock-skills triage; do
+    if jq -e --arg n "$n" '(.skillOverrides // {})[$n] != "off"' "$s" >/dev/null; then ok; else fail "claude settings switch off $n"; fi
+    if jq -e --arg n "$n" '[.permissions[] | select(.action == "skill" and .resource == $n and .effect == "deny")] | length == 0' "$o" >/dev/null; then ok; else fail "opencode denies $n"; fi
+    if jq -e --arg n "$n" '(.permission.skill // {})[$n] != "deny"' "$k" >/dev/null; then ok; else fail "kilo denies $n"; fi
+  done
+}
