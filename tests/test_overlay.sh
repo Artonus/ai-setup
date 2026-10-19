@@ -183,3 +183,12 @@ test_overlay_opencode_only_skill_is_linked_only_into_opencode() {
   run_install
   assert_missing "$HOME/.config/opencode/skills/work-docs"
 }
+
+test_overlay_kilo_json_is_merged() {
+  new_overlay
+  mkdir -p "$OV/kilo"
+  printf '{"mcp":{"work":{"type":"remote","url":"https://mcp.example.com","enabled":true}}}\n' > "$OV/kilo/kilo.json"
+  run_install
+  assert_file "$HOME/.config/kilo/kilo.json"
+  if jq -e '.mcp.work.type == "remote" and .mcp.context7 != null and (.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null)' "$HOME/.config/kilo/kilo.json" >/dev/null; then ok; else fail "kilo merge wrong"; fi
+}

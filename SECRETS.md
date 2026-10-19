@@ -2,8 +2,8 @@
 
 Names only. Never put a value in this repo. Export these from a `~/.bash_secrets` file
 (`chmod 600`, sourced by `~/.zshrc` with `[ -f ~/.bash_secrets ] && source ~/.bash_secrets`)
-or load them from a password manager before starting the tool. OpenCode reads `{env:VAR}` references at startup; a missing variable
-disables or breaks only the server that uses it.
+or load them from a password manager before starting the tool. OpenCode and Kilo read `{env:VAR}` references at startup; a missing variable
+disables or breaks only the server that uses it. Kilo uses the same variables as OpenCode.
 
 Work-only variables live in the private overlay's own `SECRETS.md`.
 

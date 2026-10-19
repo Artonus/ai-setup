@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Install Claude Code + OpenCode config from this repo by symlinking into $HOME.
+# Install Claude Code + OpenCode + Kilo config from this repo by symlinking into $HOME.
 # Portable to macOS (bash 3.2, BSD userland) and Ubuntu. See README.md.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CLAUDE_DIR="$HOME/.claude"
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+KILO_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/kilo"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ai-setup"
 MANIFEST="$STATE_DIR/manifest"
 CLAUDE_JSON="$HOME/.claude.json"
@@ -33,15 +34,15 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [--dry-run] [--uninstall]
 
-Symlinks the shared Claude Code / OpenCode config into ~/.claude and
-~/.config/opencode. Existing files are backed up, never deleted.
+Symlinks the shared Claude Code / OpenCode / Kilo config into ~/.claude,
+~/.config/opencode and ~/.config/kilo. Existing files are backed up, never deleted.
 
   --dry-run    Show what would change; touch nothing.
   --uninstall  Remove everything a previous run created (backups are kept).
   -h, --help   Show this help.
 
 Environment:
-  AI_SETUP_OVERLAY  Directory with a private overlay (shared/, claude/, opencode/)
+  AI_SETUP_OVERLAY  Directory with a private overlay (shared/, claude/, opencode/, kilo/)
                     layered on top of this repo. See overlay.example/.
 EOF
 }
@@ -272,7 +273,7 @@ preflight_overlay() {
   [ -d "$AI_SETUP_OVERLAY" ] || die "AI_SETUP_OVERLAY is not a directory: $AI_SETUP_OVERLAY"
   AI_SETUP_OVERLAY="$(cd "$AI_SETUP_OVERLAY" && pwd -P)"
   local f
-  for f in claude/settings.json claude/mcp.json opencode/opencode.json; do
+  for f in claude/settings.json claude/mcp.json opencode/opencode.json kilo/kilo.json; do
     [ -f "$AI_SETUP_OVERLAY/$f" ] || continue
     [ -f "$REPO/$f" ] || continue
     command -v jq >/dev/null 2>&1 || die "jq is required to merge $f from the overlay"
@@ -291,6 +292,11 @@ install_all() {
   sync_mcp "$(mcp_desired)"
   link "$(src_for shared AGENTS.md)" "$OPENCODE_DIR/AGENTS.md"
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
+  # Kilo (an OpenCode V1 fork) reads ~/.claude/skills itself, like OpenCode. It merges kilo.json
+  # with a hand-written kilo.jsonc, so an unmanaged kilo.jsonc is backed up out of the way.
+  link "$(src_for shared AGENTS.md)" "$KILO_DIR/AGENTS.md"
+  install_json kilo kilo.json "$KILO_DIR/kilo.json"
+  clear_dest "$KILO_DIR/kilo.jsonc"
   link_children shared skills "$CLAUDE_DIR/skills"
   link_vendor_skills
   link_matt_skills

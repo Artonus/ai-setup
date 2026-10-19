@@ -52,7 +52,7 @@ new_env() {
   unset XDG_CONFIG_HOME XDG_STATE_HOME AI_SETUP_OVERLAY
   REPO="$T/ai setup"
   mkdir -p "$REPO"
-  cp -R "$ROOT/install.sh" "$ROOT/shared" "$ROOT/claude" "$ROOT/opencode" "$ROOT/tools" "$REPO/"
+  cp -R "$ROOT/install.sh" "$ROOT/shared" "$ROOT/claude" "$ROOT/opencode" "$ROOT/kilo" "$ROOT/tools" "$REPO/"
   mkdir -p "$REPO/shared/skills/demo"
   printf '# demo skill\n' > "$REPO/shared/skills/demo/SKILL.md"
   printf 'say hello\n' > "$REPO/shared/commands/hello.md"

@@ -176,3 +176,11 @@ test_layout_anthropic_skills_is_a_submodule() {
 test_layout_matt_pocock_skills_is_a_submodule() {
   if grep -q 'vendor/mattpocock-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "mattpocock skills submodule not declared"; fi
 }
+
+test_layout_kilo_config_is_v1_with_superpowers_and_env_credentials() {
+  local k="$ROOT/kilo/kilo.json"
+  if jq empty "$k" >/dev/null 2>&1; then ok; else fail "kilo/kilo.json is not valid JSON"; return; fi
+  if jq -e '.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$k" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugin (Kilo uses V1 keys)"; fi
+  if jq -e '(has("plugins") or has("permissions") or has("providers")) | not' "$k" >/dev/null; then ok; else fail "kilo/kilo.json has a V2 top-level key"; fi
+  if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.environment // {}) | to_entries[].value | select(test("KEY|TOKEN|PAT|SECRET"; "i")))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$k" >/dev/null; then ok; else fail "a Kilo MCP credential is not an {env:VAR} reference"; fi
+}

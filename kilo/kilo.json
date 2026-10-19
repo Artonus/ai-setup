@@ -1,0 +1,41 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      }
+    },
+    "todoist": {
+      "type": "remote",
+      "url": "https://ai.todoist.net/mcp",
+      "enabled": true
+    },
+    "trilium": {
+      "type": "remote",
+      "url": "https://trilium.example.com/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
+      }
+    }
+  },
+  "permission": {
+    "skill": {
+      "context7-mcp": "deny",
+      "diagnose": "deny",
+      "find-skills": "deny",
+      "tdd": "deny",
+      "to-issues": "deny",
+      "to-prd": "deny",
+      "write-a-skill": "deny",
+      "zoom-out": "deny"
+    }
+  },
+  "plugin": [
+    "superpowers@git+https://github.com/obra/superpowers.git"
+  ]
+}

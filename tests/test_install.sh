@@ -174,3 +174,20 @@ test_install_links_tools_into_home_bin_and_uninstall_removes_them() {
   run_install --uninstall
   assert_missing "$HOME/bin/demo-tool"
 }
+
+test_install_links_kilo_config_and_rules() {
+  run_install
+  assert_eq 0 "$RC" "install exits 0"
+  assert_link "$HOME/.config/kilo/kilo.json" "$REPO/kilo/kilo.json"
+  assert_link "$HOME/.config/kilo/AGENTS.md" "$REPO/shared/AGENTS.md"
+}
+
+test_install_backs_up_unmanaged_kilo_jsonc() {
+  mkdir -p "$HOME/.config/kilo"
+  printf '{"mcp":{}}\n' > "$HOME/.config/kilo/kilo.jsonc"
+  run_install
+  assert_missing "$HOME/.config/kilo/kilo.jsonc"
+  assert_eq 1 "$(count_backups "$HOME/.config/kilo/kilo.jsonc")" "old kilo.jsonc was backed up"
+  run_install
+  assert_contains "$OUT" "ai-setup: 0 change(s)" "second run changes nothing"
+}

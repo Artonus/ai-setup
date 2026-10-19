@@ -1,6 +1,6 @@
 # ai-setup
 
-My shared Claude Code and OpenCode configuration. One repo, installed on personal and work
+My shared Claude Code, OpenCode and Kilo configuration. One repo, installed on personal and work
 machines (macOS and Ubuntu). Work-specific config lives in a private overlay and never in
 this repo.
 
@@ -15,6 +15,7 @@ this repo.
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
 | `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
+| `kilo/` | `kilo.json` for Kilo (an OpenCode V1 fork, V1 keys: `mcp.<name>` with `enabled`, `permission`, `plugin`), linked into `~/.config/kilo` next to `AGENTS.md` |
 | `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`); empty here, the overlay can add its own |
 | `overlay.example/` | Template for a private work overlay |
 
@@ -52,7 +53,7 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 - Same-named files replace the base file. Note this means an overlay `shared/AGENTS.md`
   replaces the base one rather than adding to it.
 - New entries in `shared/skills|agents|commands/` are added next to the base ones.
-- `claude/settings.json` and `opencode/opencode.json` are deep-merged into a generated file:
+- `claude/settings.json`, `opencode/opencode.json` and `kilo/kilo.json` are deep-merged into a generated file:
   objects merge, arrays are unioned (an overlay can add `deny` rules but never drop base ones),
   overlay scalars win.
 - A wrong `AI_SETUP_OVERLAY` path or invalid overlay JSON stops the install before anything changes.
@@ -116,6 +117,11 @@ Checked against the official docs (2026-10-02; OpenCode V2 on 2026-10-16):
   avoid duplicates.
 - OpenCode V2 reads only `AGENTS.md`, never `CLAUDE.md`; the installer always provides
   `~/.config/opencode/AGENTS.md`, so Claude-only notes in `claude/CLAUDE.md` stay out of OpenCode.
+- Kilo (checked 2026-10-19, Kilo 7.3.46) reads `~/.config/kilo/kilo.json` and expands
+  `{env:VAR}` in it, loads `~/.config/kilo/AGENTS.md` as global rules, and reads skills from
+  `~/.claude/skills/` itself. It also merges a `kilo.jsonc` from the same folder, so the
+  installer backs up an unmanaged `kilo.jsonc` to keep a single source. `kilo debug config` and
+  `kilo debug skill` show what it resolved.
 - Claude Code resolves `@~/.claude/AGENTS.md` imports from the home directory, which is why
   `claude/CLAUDE.md` uses that path rather than a relative one (it is installed as a symlink).
 - In Claude Cowork desktop sessions, a symlinked `~/.claude/CLAUDE.md` is skipped by design.
