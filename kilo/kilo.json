@@ -21,6 +21,14 @@
       "headers": {
         "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
       }
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@latest"
+      ],
+      "enabled": true
     }
   },
   "permission": {

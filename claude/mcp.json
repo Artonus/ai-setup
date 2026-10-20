@@ -6,6 +6,13 @@
       "headers": {
         "Authorization": "Bearer ${TRILIUM_MCP_TOKEN}"
       }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }

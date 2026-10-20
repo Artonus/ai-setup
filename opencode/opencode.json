@@ -23,6 +23,11 @@
           "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
         }
       },
+      "playwright": {
+        "type": "local",
+        "command": ["npx", "@playwright/mcp@latest"],
+        "disabled": false
+      },
       "google-calendar": {
         "type": "remote",
         "url": "https://calendarmcp.googleapis.com/mcp/v1",
