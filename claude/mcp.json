@@ -7,6 +7,10 @@
         "Authorization": "Bearer ${TRILIUM_MCP_TOKEN}"
       }
     },
+    "memory-search": {
+      "type": "stdio",
+      "command": "memory-search-mcp"
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",

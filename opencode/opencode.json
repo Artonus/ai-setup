@@ -23,6 +23,11 @@
           "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
         }
       },
+      "memory-search": {
+        "type": "local",
+        "command": ["memory-search-mcp"],
+        "disabled": false
+      },
       "playwright": {
         "type": "local",
         "command": ["npx", "@playwright/mcp@latest"],

@@ -28,10 +28,10 @@ Do not use them for refactoring, writing scripts from scratch, debugging busines
 
 When the Trilium tools are available, use them as persistent memory. The `Memory` note tree has `Global` (`La2EPRPZznwZ`) and `Projects` (`BAWuYX9Hbpcy`, one child note per repo, titled with the repo name). Every memory is one short note labelled `#memory`, plus `#scope=global` or `#scope=project`, `#project=<repo>` for project scope, and `#core` for critical facts.
 
-- **Recall first.** At the start of a task, search `#memory` with keywords from the request, and again with `#project=<repo>` for the current repo. Use what you find; do not ask the user for facts already stored.
+- **Recall first.** At the start of a task, call `memory_search` (the `memory-search` MCP) with a short description of the task; it ranks memories by meaning, so it finds them even when worded differently or in another language. Then search `#memory` with exact keywords (ticket ids, file names) and `#project=<repo>` for the current repo. Read a hit in full before relying on it. Use what you find; do not ask the user for facts already stored. If `memory_search` is unavailable, fall back to keyword search.
 - **Route by kind.** User preference or personal fact: Global with `#core`. Cross-project convention: Global. Project decision, bug root cause, gotcha: under `Projects/<repo>` (create the repo note if missing). Critical project fact: same, with `#core`.
 - **Store after** learning a preference or workflow, making a design decision, fixing a bug (root cause plus fix), choosing tooling, or finding a gotcha. Keep each note concise: a clear title and a few lines.
-- **Update, don't duplicate.** Search before storing. If a memory exists but is outdated or wrong, edit that note; delete it only if it no longer applies.
+- **Update, don't duplicate.** Search before storing, with `memory_search` too. If a memory exists but is outdated or wrong, edit that note; delete it only if it no longer applies.
 - **Do not store** trivia, anything already stored, temporary debugging output, secrets or credentials.
 - Ask before deleting a memory note.
 

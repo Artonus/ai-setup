@@ -197,3 +197,10 @@ test_layout_matt_workflow_skills_are_not_switched_off() {
     if jq -e --arg n "$n" '(.permission.skill // {})[$n] != "deny"' "$k" >/dev/null; then ok; else fail "kilo denies $n"; fi
   done
 }
+
+test_layout_memory_search_mcp_is_wired_everywhere() {
+  if [ -x "$ROOT/tools/bin/memory-search-mcp" ]; then ok; else fail "tools/bin/memory-search-mcp missing or not executable"; fi
+  if jq -e '.mcpServers["memory-search"].command == "memory-search-mcp"' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "claude/mcp.json lacks memory-search"; fi
+  if jq -e '.mcp.servers["memory-search"] | .command == ["memory-search-mcp"] and .disabled == false' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json lacks memory-search"; fi
+  if jq -e '.mcp["memory-search"] | .command == ["memory-search-mcp"] and .enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json lacks memory-search"; fi
+}

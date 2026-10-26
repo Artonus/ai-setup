@@ -17,7 +17,7 @@ this repo.
 | `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
 | `kilo/` | `kilo.json` for Kilo (an OpenCode V1 fork, V1 keys: `mcp.<name>` with `enabled`, `permission`, `plugin`), linked into `~/.config/kilo` next to `AGENTS.md` |
-| `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`); empty here, the overlay can add its own |
+| `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `memory-search-mcp`; the overlay can add its own |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install
@@ -69,7 +69,7 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 
 `opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` (OAuth in
 the browser on first use), `trilium` (trilium.example.com, token from `TRILIUM_MCP_TOKEN`), `playwright` (local, run with
-`npx @playwright/mcp@latest`; uses the installed Google Chrome) and `google-calendar`. Google Calendar ships **disabled**: it needs a
+`npx @playwright/mcp@latest`; uses the installed Google Chrome), `memory-search` (local, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set
 `mcp.servers.google-calendar.disabled` to `false` in your overlay's `opencode/opencode.json`,
@@ -88,6 +88,14 @@ Your other servers and Claude Code's own state are left alone; servers removed f
 removed on the next run, and `--uninstall` takes ours back out. `trilium` reads its token from
 `${TRILIUM_MCP_TOKEN}`, expanded by Claude Code at startup. `playwright` is a stdio server
 started with `npx`, so Node.js must be on `PATH`. Kilo gets the same servers in `kilo/kilo.json`.
+
+`memory-search` (`tools/bin/memory-search-mcp`, linked into `~/bin`) adds similarity search over
+the `#memory` notes: one tool, `memory_search(query)`. It is a `uv` script (needs `uv` and `~/bin`
+on `PATH`) that reads the notes through the `trilium` MCP endpoint with `TRILIUM_MCP_TOKEN`
+(ETAPI is behind the SSO proxy) and embeds each title and preview locally with fastembed and
+`google/embeddinggemma-300m`. The first run downloads its Python packages and the model (~1.2 GB)
+into `~/.cache`; vectors are cached in `~/.cache/memory-search`, so only new or changed memories
+are embedded again. Try it with `memory-search-mcp --query "some words"`.
 
 ## Adding things
 

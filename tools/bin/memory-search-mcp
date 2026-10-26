@@ -1,0 +1,154 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12,<3.14"
+# dependencies = ["mcp>=1.9,<2", "fastembed>=0.7", "numpy"]
+# ///
+"""Similarity search over the agent's #memory notes in Trilium, as a stdio MCP server.
+
+Trilium's ETAPI sits behind the SSO proxy, so notes are read through its MCP endpoint with
+TRILIUM_MCP_TOKEN. Each note's title and content preview is embedded locally with fastembed;
+vectors are cached by text hash, so only new or changed memories are embedded again.
+
+Run `memory-search-mcp --query "some words"` to try it from a terminal.
+"""
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+import numpy as np
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+from mcp.server.fastmcp import FastMCP
+
+TRILIUM_URL = os.environ.get("TRILIUM_MCP_URL", "https://trilium.example.com/mcp")
+# Multilingual: memories are in English, but requests are often in Polish. On a 10-query sample
+# it ranked the right memory first 8 times and never below third, ahead of the multilingual
+# MiniLM and mpnet models. It expects these prefixes on queries and documents.
+MODEL = "google/embeddinggemma-300m"
+QUERY_PREFIX = "task: search result | query: "
+DOC_PREFIX = "title: none | text: "
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "memory-search"
+# Share of the score given to exact word matches, so ticket ids and file names still count.
+KEYWORD_WEIGHT = 0.15
+
+server = FastMCP("memory-search")
+_embedder = None
+
+
+def embedder():
+    global _embedder
+    if _embedder is None:
+        from fastembed import TextEmbedding
+
+        _embedder = TextEmbedding(MODEL, cache_dir=str(CACHE / "models"))
+    return _embedder
+
+
+async def fetch_memories() -> list[dict]:
+    token = os.environ.get("TRILIUM_MCP_TOKEN")
+    if not token:
+        raise RuntimeError("TRILIUM_MCP_TOKEN is not set")
+    headers = {"Authorization": f"Bearer {token}"}
+    async with streamablehttp_client(TRILIUM_URL, headers=headers) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool("search_notes", {"query": "#memory", "limit": 1000})
+    if res.isError:
+        raise RuntimeError(f"Trilium search failed: {res.content[0].text}")
+    return json.loads(res.content[0].text)["results"]
+
+
+def note_text(note: dict) -> str:
+    return f"{note['title']}\n{note.get('contentPreview', '')}"
+
+
+def load_cache(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def embed_all(texts: list[str]) -> np.ndarray:
+    """Normalized vectors for texts, embedding only the ones not cached yet."""
+    path = CACHE / "vectors.json"
+    cache = load_cache(path)
+    if cache.get("model") != MODEL:
+        cache = {}
+    vectors = cache.get("vectors", {})
+    keys = [hashlib.sha256(t.encode()).hexdigest() for t in texts]
+    missing = [(k, t) for k, t in zip(keys, texts) if k not in vectors]
+    if missing:
+        for (k, _), v in zip(missing, embedder().embed([DOC_PREFIX + t for _, t in missing])):
+            vectors[k] = [float(x) for x in v]
+    # Keep only live memories, so deleted ones do not pile up.
+    vectors = {k: vectors[k] for k in keys}
+    if missing or len(vectors) != len(cache.get("vectors", {})):
+        CACHE.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"model": MODEL, "vectors": vectors}))
+    m = np.array([vectors[k] for k in keys], dtype=np.float32)
+    return m / np.linalg.norm(m, axis=1, keepdims=True)
+
+
+def words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[\w./-]+", text.lower()) if len(w) >= 3}
+
+
+def rank(query: str, notes: list[dict], limit: int) -> list[tuple[float, dict]]:
+    if not notes:
+        return []
+    texts = [note_text(n) for n in notes]
+    m = embed_all(texts)
+    q = next(iter(embedder().embed([QUERY_PREFIX + query])))
+    q = q / np.linalg.norm(q)
+    qwords = words(query)
+    scored = []
+    for note, text, sim in zip(notes, texts, m @ q):
+        overlap = len(qwords & words(text)) / len(qwords) if qwords else 0.0
+        scored.append(((1 - KEYWORD_WEIGHT) * float(sim) + KEYWORD_WEIGHT * overlap, note))
+    scored.sort(key=lambda s: s[0], reverse=True)
+    return scored[:limit]
+
+
+def render(results: list[tuple[float, dict]]) -> str:
+    if not results:
+        return "No #memory notes found."
+    lines = []
+    for score, n in results:
+        preview = " ".join(n.get("contentPreview", "").split())[:300]
+        lines.append(f"{score:.2f}  [{n.get('parentTitle', '?')}] {n['title']} (noteId {n['noteId']})\n      {preview}")
+    return "\n".join(lines)
+
+
+@server.tool()
+async def memory_search(query: str, limit: int = 8) -> str:
+    """Find agent memories (#memory notes in Trilium) by meaning, not exact words.
+
+    Use at the start of a task with a short description of the task or question. Results are
+    ranked by similarity (higher is closer) and show the parent note ([Global] or the project
+    name), the title, the noteId and a preview. Read a hit in full with the trilium
+    get_note_content tool before relying on it or editing it.
+    """
+    notes = await fetch_memories()
+    return render(await asyncio.to_thread(rank, query, notes, limit))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--query", help="search once and print the results instead of serving MCP")
+    parser.add_argument("--limit", type=int, default=8)
+    args = parser.parse_args()
+    if args.query:
+        print(render(rank(args.query, asyncio.run(fetch_memories()), args.limit)))
+    else:
+        server.run()
+
+
+if __name__ == "__main__":
+    main()
