@@ -4,3 +4,6 @@
 [submodule "vendor/mattpocock-skills"]
 	path = vendor/mattpocock-skills
 	url = https://github.com/mattpocock/skills.git
+[submodule "vendor/cloudflare-security-audit-skill"]
+	path = vendor/cloudflare-security-audit-skill
+	url = https://github.com/cloudflare/security-audit-skill.git

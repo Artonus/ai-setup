@@ -140,6 +140,13 @@ test_install_links_vendored_anthropic_skills_but_shared_wins() {
   assert_missing "$HOME/.claude/skills/pdf"
 }
 
+test_install_links_cloudflare_security_audit_skill() {
+  run_install
+  assert_link "$HOME/.claude/skills/security-audit" "$REPO/vendor/cloudflare-security-audit-skill/skills/security-audit"
+  run_install --uninstall
+  assert_missing "$HOME/.claude/skills/security-audit"
+}
+
 test_install_links_matt_pocock_skills_from_stable_categories_only() {
   run_install
   assert_link "$HOME/.claude/skills/to-tickets" "$REPO/vendor/mattpocock-skills/skills/engineering/to-tickets"

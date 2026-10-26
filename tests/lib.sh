@@ -59,6 +59,8 @@ new_env() {
   mkdir -p "$REPO/vendor/anthropic-skills/skills/pdf" "$REPO/vendor/anthropic-skills/skills/xlsx"
   printf '# pdf skill\n' > "$REPO/vendor/anthropic-skills/skills/pdf/SKILL.md"
   printf '# xlsx skill\n' > "$REPO/vendor/anthropic-skills/skills/xlsx/SKILL.md"
+  mkdir -p "$REPO/vendor/cloudflare-security-audit-skill/skills/security-audit"
+  printf '# security audit skill\n' > "$REPO/vendor/cloudflare-security-audit-skill/skills/security-audit/SKILL.md"
   mkdir -p "$REPO/vendor/mattpocock-skills/skills/engineering/tdd" "$REPO/vendor/mattpocock-skills/skills/in-progress/draft"
   printf '# tdd skill\n' > "$REPO/vendor/mattpocock-skills/skills/engineering/tdd/SKILL.md"
   mkdir -p "$REPO/vendor/mattpocock-skills/skills/engineering/to-tickets"

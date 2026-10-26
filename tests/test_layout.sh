@@ -173,6 +173,10 @@ test_layout_anthropic_skills_is_a_submodule() {
   if grep -q 'vendor/anthropic-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "anthropic skills submodule not declared"; fi
 }
 
+test_layout_cloudflare_security_audit_skill_is_a_submodule() {
+  if grep -q 'vendor/cloudflare-security-audit-skill' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "cloudflare security-audit skill submodule not declared"; fi
+}
+
 test_layout_matt_pocock_skills_is_a_submodule() {
   if grep -q 'vendor/mattpocock-skills' "$ROOT/.gitmodules" 2>/dev/null; then ok; else fail "mattpocock skills submodule not declared"; fi
 }

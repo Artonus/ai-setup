@@ -11,6 +11,7 @@ this repo.
 | `shared/AGENTS.md` | Global rules, linked into both tools |
 | `shared/skills/` | One folder per skill, linked into `~/.claude/skills` (OpenCode reads that too) |
 | `vendor/anthropic-skills/` | Git submodule of [anthropics/skills](https://github.com/anthropics/skills); each skill in it is linked into `~/.claude/skills` too (a same-named skill in `shared/skills/` wins) |
+| `vendor/cloudflare-security-audit-skill/` | Git submodule of [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill); its `security-audit` skill is linked into `~/.claude/skills` (same precedence as above) |
 | `shared/agents/`, `shared/commands/` | One file per agent / command, linked into both tools |
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
 | `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
@@ -94,7 +95,7 @@ started with `npx`, so Node.js must be on `PATH`. Kilo gets the same servers in 
 - A command or agent: drop a markdown file in `shared/commands/` or `shared/agents/`.
   Frontmatter fields differ between the tools; keep shared files to fields both accept.
 
-Update the vendored skills with `git submodule update --remote vendor/anthropic-skills vendor/mattpocock-skills`, then commit
+Update the vendored skills with `git submodule update --remote vendor/anthropic-skills vendor/cloudflare-security-audit-skill vendor/mattpocock-skills`, then commit
 the new pointer and re-run `./install.sh` (it links new skills and prunes removed ones).
 
 ## Tests

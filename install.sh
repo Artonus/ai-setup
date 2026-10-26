@@ -156,14 +156,15 @@ link_children() {
   done <<< "$names"
 }
 
-VENDOR_SKILLS="$REPO/vendor/anthropic-skills/skills"
+# Flat vendored skill submodules: every <submodule>/skills/<name>/SKILL.md is linked.
+VENDOR_SUBMODULES="anthropic-skills cloudflare-security-audit-skill"
 
-# link_vendor_skills: link each skill of the anthropics/skills submodule into ~/.claude/skills.
+# link_vendor_skills <submodule>: link each skill of vendor/<submodule>/skills into ~/.claude/skills.
 # A skill of the same name in shared/skills (or the overlay) wins. An uninitialised submodule is skipped.
 link_vendor_skills() {
-  local dir name
-  [ -d "$VENDOR_SKILLS" ] || { log "note: vendor/anthropic-skills is empty (run: git submodule update --init)"; return 0; }
-  for dir in "$VENDOR_SKILLS"/*/; do
+  local dir name skills="$REPO/vendor/$1/skills"
+  [ -d "$skills" ] || { log "note: vendor/$1 is empty (run: git submodule update --init)"; return 0; }
+  for dir in "$skills"/*/; do
     [ -f "$dir/SKILL.md" ] || continue
     name="$(basename "$dir")"
     if [ -n "$(children shared skills | grep -Fx -- "$name" || true)" ]; then continue; fi
@@ -285,7 +286,7 @@ preflight_overlay() {
 }
 
 install_all() {
-  local kind
+  local kind sub
   link "$(src_for shared AGENTS.md)" "$CLAUDE_DIR/AGENTS.md"
   link "$(src_for claude CLAUDE.md)" "$CLAUDE_DIR/CLAUDE.md"
   install_json claude settings.json "$CLAUDE_DIR/settings.json"
@@ -298,7 +299,7 @@ install_all() {
   install_json kilo kilo.json "$KILO_DIR/kilo.json"
   clear_dest "$KILO_DIR/kilo.jsonc"
   link_children shared skills "$CLAUDE_DIR/skills"
-  link_vendor_skills
+  for sub in $VENDOR_SUBMODULES; do link_vendor_skills "$sub"; done
   link_matt_skills
   for kind in agents commands; do
     link_children shared "$kind" "$CLAUDE_DIR/$kind"
