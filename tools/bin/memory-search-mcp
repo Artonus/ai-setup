@@ -21,6 +21,12 @@ import re
 import sys
 from pathlib import Path
 
+# One server runs per agent session (and per project in OpenCode), so keep each one small:
+# OpenBLAS (numpy) and the tokenizers pool otherwise start a thread per CPU core. Set before
+# the imports that read them.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 import numpy as np
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -34,6 +40,8 @@ MODEL = "google/embeddinggemma-300m"
 QUERY_PREFIX = "task: search result | query: "
 DOC_PREFIX = "title: none | text: "
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "memory-search"
+# onnxruntime threads: four embed as fast as all cores for a handful of short memories.
+EMBED_THREADS = 4
 # Share of the score given to exact word matches, so ticket ids and file names still count.
 KEYWORD_WEIGHT = 0.15
 
@@ -46,7 +54,7 @@ def embedder():
     if _embedder is None:
         from fastembed import TextEmbedding
 
-        _embedder = TextEmbedding(MODEL, cache_dir=str(CACHE / "models"))
+        _embedder = TextEmbedding(MODEL, cache_dir=str(CACHE / "models"), threads=EMBED_THREADS)
     return _embedder
 
 
