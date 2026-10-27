@@ -5,7 +5,7 @@ description: Use when the user asks about their notes or knowledge base, wants t
 
 # Trilium notes
 
-The user's personal knowledge base lives in Trilium (trilium.example.com), reached through the `trilium` MCP tools. It replaced an Obsidian vault: there are no markdown files on disk to read or grep.
+The user's personal knowledge base lives in Trilium, reached through the `trilium` MCP tools. It replaced an Obsidian vault: there are no markdown files on disk to read or grep.
 
 ## Scope
 

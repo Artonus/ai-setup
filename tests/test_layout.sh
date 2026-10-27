@@ -159,13 +159,13 @@ test_layout_opencode_skill_denies_are_v2_permission_rules() {
 
 test_layout_opencode_declares_trilium_with_env_bearer_token() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '.mcp.servers.trilium.type == "remote" and .mcp.servers.trilium.url == "https://trilium.example.com/mcp" and .mcp.servers.trilium.disabled == false' "$o" >/dev/null; then ok; else fail "trilium MCP not declared"; fi
+  if jq -e '.mcp.servers.trilium.type == "remote" and .mcp.servers.trilium.url == "{env:TRILIUM_MCP_URL}" and .mcp.servers.trilium.disabled == false' "$o" >/dev/null; then ok; else fail "trilium MCP not declared"; fi
   if jq -e '.mcp.servers.trilium.headers.Authorization == "Bearer {env:TRILIUM_MCP_TOKEN}"' "$o" >/dev/null; then ok; else fail "trilium must use an env bearer token"; fi
 }
 
 test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {
   local m="$ROOT/claude/mcp.json"
-  if jq -e '.mcpServers.trilium.type == "http" and .mcpServers.trilium.url == "https://trilium.example.com/mcp"' "$m" >/dev/null; then ok; else fail "trilium not declared in claude/mcp.json"; fi
+  if jq -e '.mcpServers.trilium.type == "http" and .mcpServers.trilium.url == "${TRILIUM_MCP_URL}"' "$m" >/dev/null; then ok; else fail "trilium not declared in claude/mcp.json"; fi
   if jq -e '[.mcpServers[].headers // {} | to_entries[].value] | all(test("^Bearer \\$\\{[A-Z0-9_]+\\}$"))' "$m" >/dev/null; then ok; else fail "claude MCP header is not a \${VAR} reference"; fi
 }
 

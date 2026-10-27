@@ -16,7 +16,7 @@
     },
     "trilium": {
       "type": "remote",
-      "url": "https://trilium.example.com/mcp",
+      "url": "{env:TRILIUM_MCP_URL}",
       "enabled": true,
       "headers": {
         "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"

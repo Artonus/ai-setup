@@ -93,7 +93,7 @@ test_install_merges_mcp_servers_into_claude_json_keeping_the_rest() {
   assert_eq 0 "$RC" "install exits 0"
   assert_eq 7 "$(jq '.numStartups' "$HOME/.claude.json")" "unrelated state is kept"
   assert_eq "https://x.test" "$(jq -r '.mcpServers.mine.url' "$HOME/.claude.json")" "user's own server is kept"
-  assert_eq "https://trilium.example.com/mcp" "$(jq -r '.mcpServers.trilium.url' "$HOME/.claude.json")" "trilium is added"
+  assert_eq '${TRILIUM_MCP_URL}' "$(jq -r '.mcpServers.trilium.url' "$HOME/.claude.json")" "trilium is added"
   assert_eq 'Bearer ${TRILIUM_MCP_TOKEN}' "$(jq -r '.mcpServers.trilium.headers.Authorization' "$HOME/.claude.json")" "token stays an env reference"
   assert_file "$HOME/.claude.json"
 }

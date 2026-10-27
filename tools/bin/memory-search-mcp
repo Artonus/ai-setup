@@ -5,9 +5,10 @@
 # ///
 """Similarity search over the agent's #memory notes in Trilium, as a stdio MCP server.
 
-Trilium's ETAPI sits behind the SSO proxy, so notes are read through its MCP endpoint with
-TRILIUM_MCP_TOKEN. Each note's title and content preview is embedded locally with fastembed;
-vectors are cached by text hash, so only new or changed memories are embedded again.
+Trilium's ETAPI sits behind the SSO proxy, so notes are read through its MCP endpoint
+(TRILIUM_MCP_URL) with TRILIUM_MCP_TOKEN. Each note's title and content preview is embedded
+locally with fastembed; vectors are cached by text hash, so only new or changed memories are
+embedded again.
 
 Run `memory-search-mcp --query "some words"` to try it from a terminal.
 """
@@ -32,7 +33,6 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server.fastmcp import FastMCP
 
-TRILIUM_URL = os.environ.get("TRILIUM_MCP_URL", "https://trilium.example.com/mcp")
 # Multilingual: memories are in English, but requests are often in Polish. On a 10-query sample
 # it ranked the right memory first 8 times and never below third, ahead of the multilingual
 # MiniLM and mpnet models. It expects these prefixes on queries and documents.
@@ -59,11 +59,12 @@ def embedder():
 
 
 async def fetch_memories() -> list[dict]:
+    url = os.environ.get("TRILIUM_MCP_URL")
     token = os.environ.get("TRILIUM_MCP_TOKEN")
-    if not token:
-        raise RuntimeError("TRILIUM_MCP_TOKEN is not set")
+    if not url or not token:
+        raise RuntimeError("TRILIUM_MCP_URL and TRILIUM_MCP_TOKEN must be set")
     headers = {"Authorization": f"Bearer {token}"}
-    async with streamablehttp_client(TRILIUM_URL, headers=headers) as (read, write, _):
+    async with streamablehttp_client(url, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             res = await session.call_tool("search_notes", {"query": "#memory", "limit": 1000})

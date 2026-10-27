@@ -2,7 +2,7 @@
   "mcpServers": {
     "trilium": {
       "type": "http",
-      "url": "https://trilium.example.com/mcp",
+      "url": "${TRILIUM_MCP_URL}",
       "headers": {
         "Authorization": "Bearer ${TRILIUM_MCP_TOKEN}"
       }
