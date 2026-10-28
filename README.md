@@ -69,11 +69,17 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 
 `opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` (OAuth in
 the browser on first use), `trilium` (URL from `TRILIUM_MCP_URL`, token from `TRILIUM_MCP_TOKEN`), `playwright` (local, run with
-`npx @playwright/mcp@latest`; uses the installed Google Chrome), `memory-search` (local, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
+the globally installed `playwright-mcp`; uses the installed Google Chrome), `memory-search` (local, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set
 `mcp.servers.google-calendar.disabled` to `false` in your overlay's `opencode/opencode.json`,
 then sign in with `opencode mcp auth google-calendar`.
+
+`opencode serve` starts a full set of local MCP servers for every directory (location) it has
+open, so local servers are run from global binaries rather than `npx`, which would keep an extra
+npm process per server per directory. Install them with
+`npm i -g @playwright/mcp@0.0.83` (plus the overlay's servers). `experimental.location_idle_timeout`
+unloads a directory's servers after 15 minutes without session activity (the default is 60).
 
 ## OpenCode plugins
 
