@@ -27,13 +27,18 @@ description: Use when adding, editing, renaming or removing a global skill, agen
    | Third-party skills | `vendor/anthropic-skills` (submodule; do not edit, add your own in `shared/skills/`) |
 
 3. Make the change there, matching the surrounding style. Add a test in `tests/` if the installer or layout is affected.
-4. Run `bash tests/run.sh`, then `./install.sh --dry-run`, then `./install.sh`.
-5. Commit in the repo only when asked (conventional commits).
+4. **Find the private overlay before any install, every time.** Agent shells often do not have `AI_SETUP_OVERLAY` set, and an install without it prunes every overlay link as stale and drops the overlay's config merge.
+   1. If `$AI_SETUP_OVERLAY` is set and is a directory, use it.
+   2. Otherwise look for it: the sibling `<repo>-private` first, then `find ~ -maxdepth 4 -type d -name '*ai-setup*private*' -not -path '*/node_modules/*'`. A real overlay has some of `shared/`, `claude/`, `opencode/`, `kilo/` at its top.
+   3. If you find one, pass it on every installer call: `AI_SETUP_OVERLAY=<path> ./install.sh ...`. If you find none, or more than one, ask the user. Do not install without it.
+5. Run `bash tests/run.sh`, then `AI_SETUP_OVERLAY=<path> ./install.sh --dry-run`. If the dry run says `remove stale` for anything you did not delete on purpose, stop: the overlay is probably missing or wrong. Then run `AI_SETUP_OVERLAY=<path> ./install.sh`.
+6. Commit in the repo only when asked (conventional commits).
 
 ## Red flags - stop
 
 - A path starting with `~/.claude/` or `~/.config/opencode/` in an Edit/Write/`rm`/`mv` call.
 - "It's just a symlink, same file" / "quick tweak, I'll port it back later" / "the installer would overwrite it anyway".
+- `./install.sh` with no `AI_SETUP_OVERLAY=` in front of it, or a dry run that wants to `remove stale` overlay skills, agents or commands.
 - Using a tool's own installer (`/plugin install`, `opencode mcp add`, `skill-creator` output directory) that writes straight to the destination: run it, then move the result into the repo and re-run `install.sh`.
 
 If the repo is unreachable or the change is machine-local, say so and ask; do not fall back to editing the destination.
