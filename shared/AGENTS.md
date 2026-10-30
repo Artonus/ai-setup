@@ -42,3 +42,11 @@ When the Trilium tools are available, the user's knowledge base is there too. Me
 - **Save** research results or a technical explanation worth rereading, a non-obvious problem and its solution, a comparison or decision with its reasoning, a how-to or setup steps you worked out, and ideas that came up on the way.
 - **Skip** trivia, code that already lives in a repo, and anything already noted (search first; update the existing note instead of duplicating it). Never store secrets.
 - **Place** the note under the best-fitting existing parent by your best guess; do not ask. Then tell the user in one line what you saved and where.
+
+## Actionable findings from research
+
+When research, an investigation or an answer to a question turns up something actionable on our side (a bug, a gap or inconsistency in our code, API, contracts, OpenAPI or docs, a missing endpoint or validation, a decision we still owe, tech debt), do not leave it buried in the prose:
+
+- End the answer with a clearly labelled **Actionable items** section. For each item give one line on what is wrong, the evidence (file path and line, or the observed behaviour), and a **proposed Jira ticket**: title, type (Task or Bug) and a one-to-two line description.
+- Propose only; never create a ticket without the user's confirmation. When the `jira-create-issue` skill is available, follow its draft format and its duplicate check.
+- Keep it to real findings. If nothing is actionable, do not add the section.
