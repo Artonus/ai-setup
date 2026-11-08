@@ -13,6 +13,10 @@ These apply to every project, in both Claude Code and OpenCode.
 - Do not add dependencies without saying so.
 - Change the AI setup (skills, agents, commands, `AGENTS.md`, `CLAUDE.md`, settings, MCP/plugin config) only in the `ai-setup` repo, never directly under `~/.claude` or `~/.config/opencode`. Use the `modifying-ai-setup` skill, then run `install.sh`.
 
+## Web content (Firecrawl)
+
+When the Firecrawl tools are available, always use them to fetch website contents (scrape, crawl, map, search, extract) instead of the built-in web fetch or `curl`. Fall back to another method only if Firecrawl fails or is unavailable, and say so. Library documentation still goes through Context7 first (below).
+
 ## Library documentation (Context7)
 
 When the Context7 tools are available, use them whenever the user asks about a library, framework, SDK, API, CLI tool, or cloud service, even well-known ones. This covers API syntax, configuration, version migration, library-specific debugging, setup, and CLI usage. Use them even when you think you know the answer: your training data may be out of date. Prefer them over web search for library docs.
@@ -47,6 +51,15 @@ When the Trilium tools are available, the user's knowledge base is there too. Me
 
 When research, an investigation or an answer to a question turns up something actionable on our side (a bug, a gap or inconsistency in our code, API, contracts, OpenAPI or docs, a missing endpoint or validation, a decision we still owe, tech debt), do not leave it buried in the prose:
 
-- End the answer with a clearly labelled **Actionable items** section. For each item give one line on what is wrong, the evidence (file path and line, or the observed behaviour), and a **proposed Jira ticket**: title, type (Task or Bug) and a one-to-two line description.
-- Propose only; never create a ticket without the user's confirmation. When the `jira-create-issue` skill is available, follow its draft format and its duplicate check.
+- End the answer with a clearly labelled **Actionable items** section. For each item give one line on what is wrong, the evidence (file path and line, or the observed behaviour), and a **proposed issue**: title, type (Task or Bug) and a one-to-two line description. Use the tracker described under "Task tracking" below.
+- Propose only; never create an issue without the user's confirmation.
 - Keep it to real findings. If nothing is actionable, do not add the section.
+
+## Task tracking (Linear)
+
+Personal and `ai-setup` work is tracked in Linear, through the Linear tools when they are available. The workspace has one team, `Aartuss` (key `AAR`); the project `Prywatne` holds private goals.
+
+- Before creating an issue, search with `list_issues` for a match and update it instead of duplicating it.
+- Create an issue only when the user asks or confirms. Put it in the `Prywatne` project unless the user names another one.
+- Write descriptions for a person to read. Put long agent detail in a collapsible "Agent notes" section at the end.
+- Do not use any other tracker here. A work overlay may add a `work-tracker` skill; when it is available and the task belongs to a work repo, follow that skill instead of this section.

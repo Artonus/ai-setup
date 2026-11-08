@@ -67,8 +67,8 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 
 ## MCP servers (OpenCode)
 
-`opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` (OAuth in
-the browser on first use), `trilium` (URL from `TRILIUM_MCP_URL`, token from `TRILIUM_MCP_TOKEN`), `playwright` (local, run with
+`opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` and `linear` (both OAuth in
+the browser on first use; Linear is the tracker for personal work, Jira exists only in the work overlay), `trilium` (URL from `TRILIUM_MCP_URL`, token from `TRILIUM_MCP_TOKEN`), `firecrawl` (local via `npx -y firecrawl-mcp`, key from `FIRECRAWL_API_KEY`), `playwright` (local, run with
 the globally installed `playwright-mcp`; uses the installed Google Chrome), `memory-search` (local, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set

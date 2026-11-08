@@ -111,6 +111,21 @@ test_layout_opencode_declares_todoist_with_automatic_oauth() {
   if jq -e '.mcp.servers.todoist | has("headers") | not' "$o" >/dev/null; then ok; else fail "todoist should use OAuth, not headers"; fi
 }
 
+test_layout_linear_mcp_uses_oauth_in_every_tool() {
+  local u="https://mcp.linear.app/mcp"
+  if jq -e --arg u "$u" '.mcp.servers.linear.type == "remote" and .mcp.servers.linear.url == $u and .mcp.servers.linear.disabled == false and (.mcp.servers.linear | has("headers") | not)' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "linear MCP not declared in opencode.json"; fi
+  if jq -e --arg u "$u" '.mcp.linear.type == "remote" and .mcp.linear.url == $u and .mcp.linear.enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "linear MCP not declared in kilo.json"; fi
+  if jq -e --arg u "$u" '.mcpServers.linear.type == "http" and .mcpServers.linear.url == $u' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "linear MCP not declared in claude/mcp.json"; fi
+}
+
+test_layout_base_rules_track_in_linear_and_keep_jira_out() {
+  local a
+  a="$(cat "$ROOT/shared/AGENTS.md")"
+  assert_contains "$a" "Linear" "AGENTS.md names Linear as the tracker"
+  assert_contains "$a" "work-tracker" "AGENTS.md points work repos at the overlay skill"
+  if grep -rqi "jira" "$ROOT/shared" "$ROOT/claude" "$ROOT/opencode" "$ROOT/kilo" "$ROOT/overlay.example" 2>/dev/null; then fail "Jira must live only in the work overlay"; else ok; fi
+}
+
 test_layout_opencode_google_calendar_is_off_until_credentials_exist() {
   local o="$ROOT/opencode/opencode.json"
   if jq -e '.mcp.servers["google-calendar"].type == "remote" and .mcp.servers["google-calendar"].url == "https://calendarmcp.googleapis.com/mcp/v1"' "$o" >/dev/null; then ok; else fail "google-calendar MCP not declared"; fi

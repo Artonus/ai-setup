@@ -18,6 +18,11 @@
         "url": "https://ai.todoist.net/mcp",
         "disabled": false
       },
+      "linear": {
+        "type": "remote",
+        "url": "https://mcp.linear.app/mcp",
+        "disabled": false
+      },
       "trilium": {
         "type": "remote",
         "url": "{env:TRILIUM_MCP_URL}",
@@ -34,6 +39,14 @@
       "playwright": {
         "type": "local",
         "command": ["playwright-mcp"],
+        "disabled": false
+      },
+      "firecrawl": {
+        "type": "local",
+        "command": ["npx", "-y", "firecrawl-mcp"],
+        "environment": {
+          "FIRECRAWL_API_KEY": "{env:FIRECRAWL_API_KEY}"
+        },
         "disabled": false
       },
       "google-calendar": {
