@@ -1,49 +1,242 @@
 #!/usr/bin/env bash
-mkdir -p ~/recordings
+# meeting-rec: record a meeting (remote side = left channel, me = right channel).
+#
+#   meeting-rec                              interactive, stop with Ctrl+C
+#   meeting-rec start [--title T] [--url U]  record in the background
+#   meeting-rec stop                         stop the background recording
+#   meeting-rec status                       exit 0 and print JSON if recording, 1 if not
+#
+# Environment:
+#   MEETING_REC_DIR     output directory (default ~/recordings)
+#   MEETING_REC_FFMPEG  ffmpeg command (default /usr/bin/ffmpeg, else ffmpeg)
+#   MEETING_REC_PACTL   pactl command (default pactl)
+set -u
 
-SINK=$(pactl get-default-sink)
-MIC=""
-MIC_GAIN=2.5   # tuned for the USB mic
-MIC_NOISE_FLOOR=${MIC_NOISE_FLOOR:--25}   # afftdn noise floor in dB: higher (e.g. -20) removes more noise but can sound muffled
+REC_DIR="${MEETING_REC_DIR:-$HOME/recordings}"
+PACTL="${MEETING_REC_PACTL:-pactl}"
+if [ -n "${MEETING_REC_FFMPEG:-}" ]; then
+  FFMPEG="$MEETING_REC_FFMPEG"
+elif [ -x /usr/bin/ffmpeg ]; then
+  FFMPEG=/usr/bin/ffmpeg
+else
+  FFMPEG=ffmpeg
+fi
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/meeting-rec.pid"
 
-# Bluetooth headset: find the input that belongs to the same device as the output
-if [[ "$SINK" == bluez_output.* ]]; then
-  BT_ID=$(echo "$SINK" | sed -E 's/^bluez_output\.([^.]+).*/\1/')
-  find_bt_mic() { pactl list sources short | awk '{print $2}' | grep -m1 "^bluez_input\.$BT_ID"; }
-  MIC=$(find_bt_mic)
-  if [ -z "$MIC" ]; then
-    # Headset is in music mode (A2DP) and has no mic: switch to the call profile
-    pactl set-card-profile "bluez_card.$BT_ID" headset-head-unit 2>/dev/null
-    sleep 2
-    SINK=$(pactl get-default-sink)
+usage() {
+  echo "usage: meeting-rec [start [--title TEXT] [--url URL] | stop | status]" >&2
+}
+
+# --- device selection (sets SINK, MIC, MIC_GAIN) ---------------------------
+
+pick_devices() {
+  local bt_id
+  SINK=$("$PACTL" get-default-sink)
+  MIC=""
+  MIC_GAIN=2.5   # tuned for the USB mic
+
+  # Bluetooth headset: find the input that belongs to the same device as the output
+  if [[ "$SINK" == bluez_output.* ]]; then
+    bt_id=$(echo "$SINK" | sed -E 's/^bluez_output\.([^.]+).*/\1/')
+    find_bt_mic() { "$PACTL" list sources short | awk '{print $2}' | grep -m1 "^bluez_input\.$bt_id"; }
     MIC=$(find_bt_mic)
+    if [ -z "$MIC" ]; then
+      # Headset is in music mode (A2DP) and has no mic: switch to the call profile
+      "$PACTL" set-card-profile "bluez_card.$bt_id" headset-head-unit 2>/dev/null
+      sleep 2
+      SINK=$("$PACTL" get-default-sink)
+      MIC=$(find_bt_mic)
+    fi
+    MIC_GAIN=1.5   # starting guess for Bluetooth, adjust after a test
   fi
-  MIC_GAIN=1.5   # starting guess for Bluetooth, adjust after a test
-fi
 
-# Not Bluetooth (or no BT mic found): use the default source, skipping monitors
-if [ -z "$MIC" ]; then
-  MIC=$(pactl get-default-source)
-  if [[ "$MIC" == *.monitor ]]; then
-    MIC=$(pactl list sources short | awk '{print $2}' | grep -v '\.monitor$' | head -n1)
+  # Not Bluetooth (or no BT mic found): use the default source, skipping monitors
+  if [ -z "$MIC" ]; then
+    MIC=$("$PACTL" get-default-source)
+    if [[ "$MIC" == *.monitor ]]; then
+      MIC=$("$PACTL" list sources short | awk '{print $2}' | grep -v '\.monitor$' | head -n1)
+    fi
   fi
-fi
+}
 
-OUT=~/recordings/meeting-$(date +%F-%H%M).wav
-echo "Output: $SINK.monitor"
-echo "Mic:    $MIC"
-echo "File:   $OUT"
-echo "Recording... press Ctrl+C to stop."
+# stereo: left = remote side (speaker output), right = me (mic)
+build_ffmpeg_args() {
+  FFMPEG_ARGS=(
+    -hide_banner -loglevel warning -stats
+    -thread_queue_size 1024 -f pulse -i "$SINK.monitor"
+    -thread_queue_size 1024 -f pulse -i "$MIC"
+    -filter_complex "[0:a]aformat=channel_layouts=mono,volume=0.7,dynaudnorm=f=250:g=15[a];[1:a]aformat=channel_layouts=mono,volume=${MIC_GAIN},dynaudnorm=f=250:g=15[b];[a][b]join=inputs=2:channel_layout=stereo"
+    -ar 16000 -y "$OUT"
+  )
+}
 
-# Keep this script alive on Ctrl+C so ffmpeg can finish writing the WAV properly
-trap ':' INT
+# --- helpers ---------------------------------------------------------------
 
-/usr/bin/ffmpeg -hide_banner -loglevel warning -stats \
-  -thread_queue_size 1024 -f pulse -i "$SINK.monitor" \
-  -thread_queue_size 1024 -f pulse -i "$MIC" \
-  -filter_complex "[0:a]aformat=channel_layouts=mono,volume=0.7,dynaudnorm=f=250:g=15[a];[1:a]aformat=channel_layouts=mono,highpass=f=100,afftdn=nf=${MIC_NOISE_FLOOR}:tn=1,volume=${MIC_GAIN},dynaudnorm=f=250:g=15:m=4[b];[a][b]join=inputs=2:channel_layout=stereo" \
-  -ar 16000 -y "$OUT"   # stereo: left = remote side (speaker output), right = me (mic)
+json_escape() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  printf '%s' "$s"
+}
 
-echo
-echo "Saved: $OUT"
-notify-send "Meeting recording" "Saved: $(basename "$OUT")" 2>/dev/null
+# Raw (still escaped) string value of a field in the metadata file.
+json_field() { # file key
+  sed -n -E "s/^  \"$2\": \"(.*)\",?\$/\1/p" "$1" 2>/dev/null | head -n1
+}
+
+# Sets REC_PID and REC_WAV when a recording is running; removes a stale PID file.
+recording_active() {
+  REC_PID=""
+  REC_WAV=""
+  [ -f "$PIDFILE" ] || return 1
+  REC_PID=$(sed -n 1p "$PIDFILE")
+  REC_WAV=$(sed -n 2p "$PIDFILE")
+  if [[ "$REC_PID" =~ ^[0-9]+$ ]] && kill -0 "$REC_PID" 2>/dev/null; then
+    # Guard against PID reuse: the process command line should mention our WAV.
+    local args
+    if args=$(ps -o args= -p "$REC_PID" 2>/dev/null) && [ -n "$args" ]; then
+      case $args in
+        *"$REC_WAV"*) return 0 ;;
+      esac
+    else
+      return 0
+    fi
+  fi
+  rm -f "$PIDFILE"
+  REC_PID=""
+  REC_WAV=""
+  return 1
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_interactive() {
+  mkdir -p "$REC_DIR"
+  pick_devices
+  OUT="$REC_DIR/meeting-$(date +%F-%H%M).wav"
+  build_ffmpeg_args
+  echo "Output: $SINK.monitor"
+  echo "Mic:    $MIC"
+  echo "File:   $OUT"
+  echo "Recording... press Ctrl+C to stop."
+
+  # Keep this script alive on Ctrl+C so ffmpeg can finish writing the WAV properly
+  trap ':' INT
+
+  "$FFMPEG" "${FFMPEG_ARGS[@]}"
+
+  echo
+  echo "Saved: $OUT"
+  notify-send "Meeting recording" "Saved: $(basename "$OUT")" 2>/dev/null
+  return 0
+}
+
+cmd_start() {
+  local title="" url="" started_at meta log pid
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --title) [ $# -ge 2 ] || { usage; return 2; }; title=$2; shift 2 ;;
+      --title=*) title=${1#--title=}; shift ;;
+      --url) [ $# -ge 2 ] || { usage; return 2; }; url=$2; shift 2 ;;
+      --url=*) url=${1#--url=}; shift ;;
+      *) usage; return 2 ;;
+    esac
+  done
+
+  if recording_active; then
+    echo "Already recording (pid $REC_PID): $REC_WAV"
+    return 0
+  fi
+
+  mkdir -p "$REC_DIR" "$(dirname "$PIDFILE")"
+  pick_devices
+  OUT="$REC_DIR/meeting-$(date +%F-%H%M).wav"
+  meta="${OUT%.wav}.json"
+  log="${OUT%.wav}.log"
+  started_at=$(date +%Y-%m-%dT%H:%M:%S%z)
+  build_ffmpeg_args
+
+  # Job control gives the background job its own process group and default
+  # signal handling, so SIGINT reaches ffmpeg and Ctrl+C in this terminal does not.
+  set -m
+  nohup "$FFMPEG" "${FFMPEG_ARGS[@]}" </dev/null >"$log" 2>&1 &
+  pid=$!
+  set +m
+  disown "$pid" 2>/dev/null
+
+  sleep 0.5
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "ffmpeg exited right after start; see $log" >&2
+    return 1
+  fi
+
+  printf '%s\n%s\n' "$pid" "$OUT" >"$PIDFILE"
+  {
+    printf '{\n'
+    printf '  "title": "%s",\n' "$(json_escape "$title")"
+    printf '  "url": "%s",\n' "$(json_escape "$url")"
+    printf '  "started_at": "%s",\n' "$started_at"
+    printf '  "ended_at": null,\n'
+    printf '  "wav": "%s"\n' "$(json_escape "$OUT")"
+    printf '}\n'
+  } >"$meta"
+
+  echo "Recording started (pid $pid): $OUT"
+  return 0
+}
+
+cmd_stop() {
+  local meta ended_at i
+  if ! recording_active; then
+    echo "Not recording."
+    return 0
+  fi
+  kill -INT "$REC_PID" 2>/dev/null
+
+  # Wait for ffmpeg to finish writing the WAV (up to ~30 s).
+  for ((i = 0; i < 300; i++)); do
+    kill -0 "$REC_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$REC_PID" 2>/dev/null; then
+    echo "ffmpeg (pid $REC_PID) did not exit after SIGINT; sending SIGTERM" >&2
+    kill -TERM "$REC_PID" 2>/dev/null
+    sleep 1
+  fi
+
+  meta="${REC_WAV%.wav}.json"
+  if [ -f "$meta" ]; then
+    ended_at=$(date +%Y-%m-%dT%H:%M:%S%z)
+    sed -E "s/^  \"ended_at\": null,\$/  \"ended_at\": \"$ended_at\",/" "$meta" >"$meta.tmp" \
+      && mv "$meta.tmp" "$meta"
+  fi
+  rm -f "$PIDFILE"
+  echo "Saved: $REC_WAV"
+  return 0
+}
+
+cmd_status() {
+  local meta title url
+  if ! recording_active; then
+    echo "Not recording."
+    return 1
+  fi
+  meta="${REC_WAV%.wav}.json"
+  title=$(json_field "$meta" title)
+  url=$(json_field "$meta" url)
+  printf '{"recording": true, "pid": %s, "wav": "%s", "title": "%s", "url": "%s"}\n' \
+    "$REC_PID" "$(json_escape "$REC_WAV")" "$title" "$url"
+  return 0
+}
+
+case "${1:-}" in
+  "") cmd_interactive ;;
+  start) shift; cmd_start "$@" ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  -h | --help) usage ;;
+  *) usage; exit 2 ;;
+esac
