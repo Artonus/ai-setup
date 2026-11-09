@@ -17,7 +17,7 @@ this repo.
 | `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
 | `kilo/` | `kilo.json` for Kilo (an OpenCode V1 fork, V1 keys: `mcp.<name>` with `enabled`, `permission`, `plugin`), linked into `~/.config/kilo` next to `AGENTS.md` |
-| `tools/bin/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `memory-search-mcp`; the overlay can add its own |
+| `tools/bin/`, `tools/lib/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `memory-search-mcp`, `meeting-rec`, `meeting-transcribe` (records a meeting into `~/recordings`, stereo: left = remote, right = your mic; transcribes it with Whisper into `~/transcriptions`, turns labelled `Me:` / `Remote:` via `tools/lib/merge-tracks.py`); the overlay can add its own. Run `python3 -m unittest discover -s tests -p 'test_merge_tracks.py'` for the merge test |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install
