@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""meeting-cleanup: safe retention for meeting recordings (WAV files).
+
+Default is a dry run that only lists candidates. A candidate is
+`meeting-*.wav` in $MEETING_REC_DIR (default ~/recordings) that is older than
+$MEETING_RETENTION_DAYS (default 14), has a non-empty transcript
+$MEETING_NOTES_DIR/meeting-X.txt (default ~/notes) and, with --require-notes,
+the marker meeting-X.notes-done. A recording whose mtime changed in the last
+$MEETING_CLEANUP_BUSY_MINUTES (default 10) is treated as still being written
+and is never touched. Only the .wav moves or goes; .json and .log stay.
+
+  --archive   move candidates to <rec dir>/archive/ (with --flac and ffmpeg
+              available, compress to .flac there and remove the .wav only
+              after ffmpeg succeeded)
+  --delete    delete candidates after an interactive y/N confirmation; without
+              a TTY it also needs --yes
+Nothing runs in the background. An optional systemd timer may call
+`meeting-cleanup --archive` only, never --delete.
+"""
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+
+def env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        sys.exit("meeting-cleanup: %s must be an integer" % name)
+
+
+def has_transcript(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return bool(f.read().strip())
+    except OSError:
+        return False
+
+
+def find_candidates(rec_dir, notes_dir, retention_days, busy_minutes, require_notes):
+    now = time.time()
+    out = []
+    try:
+        names = sorted(os.listdir(rec_dir))
+    except OSError:
+        return out
+    for name in names:
+        if not (name.startswith("meeting-") and name.endswith(".wav")):
+            continue
+        path = os.path.join(rec_dir, name)
+        if not os.path.isfile(path) or os.path.islink(path):
+            continue
+        age = now - os.path.getmtime(path)
+        if age < busy_minutes * 60 or age < retention_days * 86400:
+            continue
+        stem = name[:-4]
+        if not has_transcript(os.path.join(notes_dir, stem + ".txt")):
+            continue
+        if require_notes and not os.path.isfile(os.path.join(notes_dir, stem + ".notes-done")):
+            continue
+        out.append((path, os.path.getsize(path)))
+    return out
+
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return "%.1f %s" % (n, unit) if unit != "B" else "%d B" % n
+        n /= 1024.0
+
+
+def archive_one(path, rec_dir, flac):
+    adir = os.path.join(rec_dir, "archive")
+    os.makedirs(adir, exist_ok=True)
+    base = os.path.basename(path)
+    if flac and shutil.which("ffmpeg"):
+        dest = os.path.join(adir, base[:-4] + ".flac")
+        if os.path.exists(dest):
+            return "exists: %s" % dest
+        tmp = dest + ".part"
+        r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", path,
+                            "-f", "flac", tmp])
+        if r.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            return "ffmpeg failed, kept: %s" % path
+        os.replace(tmp, dest)
+        os.remove(path)
+        return "flac: %s" % dest
+    dest = os.path.join(adir, base)
+    if os.path.exists(dest):
+        return "exists: %s" % dest
+    shutil.move(path, dest)
+    return "moved: %s" % dest
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Retention for meeting recordings (dry run by default).")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--archive", action="store_true", help="move candidates to recordings/archive/")
+    g.add_argument("--delete", action="store_true", help="delete candidates after confirmation")
+    p.add_argument("--yes", action="store_true", help="skip the --delete prompt (required without a TTY)")
+    p.add_argument("--require-notes", action="store_true", help="also require meeting-X.notes-done")
+    p.add_argument("--flac", action="store_true", help="with --archive: compress to flac when ffmpeg exists")
+    a = p.parse_args(argv)
+
+    home = os.path.expanduser("~")
+    rec_dir = os.environ.get("MEETING_REC_DIR") or os.path.join(home, "recordings")
+    notes_dir = os.environ.get("MEETING_NOTES_DIR") or os.path.join(home, "notes")
+    days = env_int("MEETING_RETENTION_DAYS", 14)
+    busy = env_int("MEETING_CLEANUP_BUSY_MINUTES", 10)
+
+    cands = find_candidates(rec_dir, notes_dir, days, busy, a.require_notes)
+    total = sum(s for _, s in cands)
+    print("%d candidate(s), %s (older than %d days, non-empty transcript%s)" % (
+        len(cands), human(total), days, ", notes-done" if a.require_notes else ""))
+    for path, size in cands:
+        print("  %s  %s" % (human(size).rjust(9), path))
+    if not cands:
+        return 0
+    if not (a.archive or a.delete):
+        print("dry run: nothing changed (use --archive or --delete)")
+        return 0
+
+    if a.archive:
+        for path, _ in cands:
+            print("  " + archive_one(path, rec_dir, a.flac))
+        return 0
+
+    if not a.yes:
+        if not sys.stdin.isatty():
+            print("refusing to delete: no TTY, pass --yes to confirm", file=sys.stderr)
+            return 2
+        try:
+            ans = input("Delete %d file(s), %s, permanently? [y/N] " % (len(cands), human(total)))
+        except EOFError:
+            ans = ""
+        if ans.strip().lower() not in ("y", "yes"):
+            print("aborted, nothing deleted")
+            return 1
+    for path, _ in cands:
+        os.remove(path)
+        print("  deleted: " + path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# meeting-notify <report.md>: desktop notification "Notatka gotowa" after meeting-notes-run.
+#
+# Reads the last NOTE_TITLE: and NOTE_ID: lines of the report (contract K6) and builds the
+# link ${TRILIUM_URL}/#root/<NOTE_ID> (TRILIUM_URL = the Trilium web UI address, NOT
+# TRILIUM_MCP_URL; the /#root/<id> form is not verified on the real server). Without
+# TRILIUM_URL or NOTE_ID the notification has no link. No notify-send (macOS) = silent skip.
+# When notify-send supports --action, a "open" button runs xdg-open in the background,
+# with a time limit (MEETING_NOTIFY_WAIT, default 60 s), so the caller is never blocked.
+# Under systemd --user, notify-send needs DBUS_SESSION_BUS_ADDRESS; verify on Ubuntu.
+# MEETING_NOTIFY_SYNC=1 waits for that background part (for tests). Always exits 0.
+set -u
+report="${1:-}"
+[ -n "$report" ] && [ -f "$report" ] || { echo "usage: meeting-notify <report.md>" >&2; exit 0; }
+command -v notify-send >/dev/null 2>&1 || exit 0
+
+last() { grep "^$1:" "$report" | tail -n 1 | sed -e "s/^$1:[[:space:]]*//" -e 's/[[:space:]]*$//'; }
+title="$(last NOTE_TITLE)"
+id="$(last NOTE_ID)"
+[ -n "$title" ] || title="$(basename "$report" .report.md)"
+
+link=""
+if [ -n "${TRILIUM_URL:-}" ] && [ -n "$id" ]; then
+  link="${TRILIUM_URL%/}/#root/$id"
+fi
+body="$title"
+[ -n "$link" ] && body="$title
+$link"
+
+wait_s="${MEETING_NOTIFY_WAIT:-60}"
+if [ -n "$link" ] && command -v xdg-open >/dev/null 2>&1 \
+   && notify-send --help 2>&1 | grep -q -- '--action'; then
+  (
+    if command -v timeout >/dev/null 2>&1; then
+      choice="$(timeout "$wait_s" notify-send --action=open=Open --wait "Notatka gotowa" "$body" 2>/dev/null)"
+    else
+      choice="$(notify-send --action=open=Open --wait "Notatka gotowa" "$body" 2>/dev/null)"
+    fi
+    [ "$choice" = open ] && xdg-open "$link" >/dev/null 2>&1
+  ) >/dev/null 2>&1 &
+  [ "${MEETING_NOTIFY_SYNC:-0}" = 1 ] && wait
+  exit 0
+fi
+notify-send "Notatka gotowa" "$body" >/dev/null 2>&1
+exit 0

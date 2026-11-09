@@ -219,3 +219,31 @@ test_layout_memory_search_mcp_is_wired_everywhere() {
   if jq -e '.mcp.servers["memory-search"] | .command == ["memory-search-mcp"] and .disabled == false' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json lacks memory-search"; fi
   if jq -e '.mcp["memory-search"] | .command == ["memory-search-mcp"] and .enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json lacks memory-search"; fi
 }
+
+test_layout_meeting_notes_agent_has_shared_frontmatter() {
+  local f="$ROOT/shared/agents/meeting-notes.md" keys
+  if [ -f "$f" ]; then ok; else fail "missing shared/agents/meeting-notes.md"; return; fi
+  assert_eq "---" "$(sed -n 1p "$f")" "frontmatter opens on line 1"
+  keys="$(awk 'NR==1{next} /^---$/{exit} {print}' "$f" | sed 's/:.*//' | sort -u | tr '\n' ' ')"
+  assert_eq "description name " "$keys" "frontmatter has only name and description (both tools accept them)"
+  assert_contains "$(cat "$f")" "name: meeting-notes" "agent name matches the filename"
+}
+
+test_layout_meeting_notes_agent_describes_sidecar_labels_and_report() {
+  local c; c="$(cat "$ROOT/shared/agents/meeting-notes.md" 2>/dev/null)"
+  assert_contains "$c" "meeting-X.json" "agent reads the sidecar next to the transcript"
+  assert_contains "$c" "started_at" "agent uses started_at from the sidecar"
+  assert_contains "$c" "participants" "agent uses sidecar participants"
+  assert_contains "$c" "MEETING_NOTES_DIR" "agent scans the K2 notes directory"
+  assert_contains "$c" "Remote N" "agent describes Remote N speaker labels"
+  assert_contains "$c" "NOTE_TITLE:" "report ends with a NOTE_TITLE line"
+  assert_contains "$c" "NOTE_ID:" "report ends with a NOTE_ID line"
+  assert_contains "$c" "Proposed Todoist tasks" "report keeps the Proposed Todoist tasks section"
+}
+
+test_layout_meeting_tools_are_executable() {
+  local f
+  for f in tools/bin/meeting-rec tools/bin/meeting-transcribe tools/lib/merge-tracks.py; do
+    if [ -x "$ROOT/$f" ]; then ok; else fail "$f is not executable"; fi
+  done
+}

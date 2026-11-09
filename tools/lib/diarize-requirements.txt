@@ -1,0 +1,8 @@
+# Speaker diarization for meeting-transcribe (tools/lib/diarize.py).
+# Install into a separate venv on Ubuntu, not into the Whisper environment.
+# Versions are deliberately NOT pinned: pin them after the first working
+# install on Ubuntu (pip freeze) once the combination is verified.
+# Unverified: which pyannote.audio release ships Community-1 and whether the
+# token argument is `token=` or `use_auth_token=` (diarize.py handles both).
+# torch is pulled in by pyannote.audio; pick the build matching the CUDA driver.
+pyannote.audio

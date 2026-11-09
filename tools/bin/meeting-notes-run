@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# meeting-notes-run <transcript.txt>: run the meeting-notes agent on one transcript.
+#
+# Writes meeting-X.report.md next to the transcript and, only on success, the marker
+# meeting-X.notes-done. A second run for the same transcript does nothing (exit 0).
+# The agent must NOT create Todoist tasks; it returns proposals in its report, and the
+# last report lines are `NOTE_TITLE: ...` / `NOTE_ID: ...` (read by meeting-notify).
+#
+# Environment:
+#   MEETING_NOTES_CMD      command run with `bash -c`; see DEFAULT_CMD below. It gets the
+#                          prompt in $MEETING_NOTES_PROMPT and the path in $MEETING_NOTES_FILE,
+#                          and must print its report on stdout.
+#   MEETING_NOTES_TIMEOUT  seconds before the agent is killed (default 900)
+#   MEETING_NOTES_DIR      transcript dir, holds .notes.log (default ~/notes)
+#   TRILIUM_MCP_URL, TRILIUM_MCP_TOKEN
+#                          required (only checked, values are never printed). When they are
+#                          empty the Trilium MCP server fails with INVALID_CONFIG.
+# Exit codes: 0 done or already done, 1 agent failed or timed out (no marker),
+#             2 usage or missing config, 3 another run holds the lock for this transcript.
+set -u
+
+# --- TO VERIFY ON UBUNTU (`claude --help`): the flags are NOT confirmed. -------------
+# Open points: how to select the agent (`--agent meeting-notes`? or put "use the
+# meeting-notes agent" in the prompt), how to allow the Trilium MCP tools without a
+# prompt (`--allowedTools "mcp__trilium__*"`? `--permission-mode`?), and `-p` output
+# format. Change only this line, or set MEETING_NOTES_CMD (e.g. in the EnvironmentFile).
+DEFAULT_CMD='claude -p "$MEETING_NOTES_PROMPT" --agent meeting-notes'
+# --------------------------------------------------------------------------------------
+
+PROMPT_TEMPLATE='Process the meeting transcript at %s with the meeting-notes agent: create the Trilium meeting note. Do NOT create any Todoist tasks; list them under "Proposed Todoist tasks" in your report instead. End the report with the lines "NOTE_TITLE: <title>" and "NOTE_ID: <Trilium note id>".'
+
+transcript="${1:-}"
+if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+  echo "usage: meeting-notes-run <transcript.txt>" >&2
+  exit 2
+fi
+tdir="$(cd "$(dirname "$transcript")" && pwd -P)"
+base="$(basename "$transcript")"
+stem="${base%.txt}"
+transcript="$tdir/$base"
+marker="$tdir/$stem.notes-done"
+report="$tdir/$stem.report.md"
+NOTES_DIR="${MEETING_NOTES_DIR:-$HOME/notes}"
+mkdir -p "$NOTES_DIR" 2>/dev/null
+LOG="$NOTES_DIR/.notes.log"
+TIMEOUT="${MEETING_NOTES_TIMEOUT:-900}"
+CMD="${MEETING_NOTES_CMD:-$DEFAULT_CMD}"
+
+log() { printf '%s %s: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$stem" "$*" >> "$LOG" 2>/dev/null; }
+say() { printf '%s\n' "$*" >&2; log "$*"; }
+
+[ -e "$marker" ] && { log "already done, skipping"; exit 0; }
+
+missing=""
+[ -n "${TRILIUM_MCP_URL:-}" ] || missing="TRILIUM_MCP_URL"
+[ -n "${TRILIUM_MCP_TOKEN:-}" ] || missing="${missing:+$missing, }TRILIUM_MCP_TOKEN"
+if [ -n "$missing" ]; then
+  say "missing or empty environment variable(s): $missing. The Trilium MCP server would fail with INVALID_CONFIG. Set them in the daemon's EnvironmentFile (e.g. ~/.config/meeting/env, chmod 600)."
+  exit 2
+fi
+
+# --- lock (flock, or an mkdir lock when flock is missing, e.g. macOS) ------------------
+lockbase="$tdir/.$stem.notes-lock"
+lockdir=""
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$lockbase"
+  flock -n 9 || { say "another run holds the lock, exiting"; exit 3; }
+else
+  lockdir="$lockbase.d"
+  if ! mkdir "$lockdir" 2>/dev/null; then
+    oldpid="$(cat "$lockdir/pid" 2>/dev/null)"
+    if [ -n "$oldpid" ] && ! kill -0 "$oldpid" 2>/dev/null; then
+      rm -rf "$lockdir"   # stale lock of a dead process
+      mkdir "$lockdir" 2>/dev/null || { say "another run holds the lock, exiting"; exit 3; }
+    else
+      say "another run holds the lock, exiting"; exit 3
+    fi
+  fi
+  echo $$ > "$lockdir/pid"
+fi
+tmp_out="$(mktemp "${TMPDIR:-/tmp}/notes-run.out.XXXXXX")"
+tmp_err="$(mktemp "${TMPDIR:-/tmp}/notes-run.err.XXXXXX")"
+cleanup() { rm -f "$tmp_out" "$tmp_err"; [ -n "$lockdir" ] && rm -rf "$lockdir"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+[ -e "$marker" ] && { log "already done, skipping"; exit 0; }   # finished while we waited
+
+# --- run the agent with a time limit ---------------------------------------------------
+# shellcheck disable=SC2059
+MEETING_NOTES_PROMPT="$(printf "$PROMPT_TEMPLATE" "$transcript")"
+MEETING_NOTES_FILE="$transcript"
+export MEETING_NOTES_PROMPT MEETING_NOTES_FILE
+log "start (timeout ${TIMEOUT}s)"
+
+rc=0
+if command -v timeout >/dev/null 2>&1; then
+  timeout "$TIMEOUT" bash -c "$CMD" > "$tmp_out" 2> "$tmp_err" < /dev/null
+  rc=$?
+else
+  bash -c "$CMD" > "$tmp_out" 2> "$tmp_err" < /dev/null &
+  pid=$!
+  ( sleep "$TIMEOUT"; pkill -P "$pid" 2>/dev/null; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  watcher=$!
+  wait "$pid"; rc=$?
+  kill "$watcher" 2>/dev/null; pkill -P "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  # a killed command reports 143 (TERM); only call it a timeout if the limit was reached
+  [ "$rc" = 143 ] && rc=124
+fi
+
+# log the tail of stderr, with the token masked
+errtail="$(tail -n 20 "$tmp_err" | tr -d '\r')"
+errtail="${errtail//"${TRILIUM_MCP_TOKEN}"/***}"
+
+if [ "$rc" != 0 ]; then
+  if [ "$rc" = 124 ]; then say "agent timed out after ${TIMEOUT}s, no marker written"
+  else say "agent failed with exit code $rc, no marker written"; fi
+  [ -n "$errtail" ] && printf '%s\n' "$errtail" | sed 's/^/  stderr: /' >> "$LOG"
+  exit 1
+fi
+if [ ! -s "$tmp_out" ]; then
+  say "agent produced an empty report, no marker written"
+  [ -n "$errtail" ] && printf '%s\n' "$errtail" | sed 's/^/  stderr: /' >> "$LOG"
+  exit 1
+fi
+
+cp "$tmp_out" "$report.part" && mv "$report.part" "$report" && : > "$marker" || { say "cannot write report or marker"; exit 1; }
+if ! grep -q '^NOTE_ID:' "$report"; then
+  log "warning: report has no NOTE_ID line"
+fi
+log "done, report $report"
+exit 0

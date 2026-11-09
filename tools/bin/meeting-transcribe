@@ -4,37 +4,79 @@ export LD_LIBRARY_PATH="$SP/nvidia/cublas/lib:$SP/nvidia/cudnn/lib:$LD_LIBRARY_P
 LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
 
 REC=${MEETING_REC_DIR:-~/recordings}
-OUT=${MEETING_TRANSCRIPT_DIR:-~/transcriptions}
-LOG="$OUT/.transcribe.log"
-mkdir -p "$REC" "$OUT"
+NOTES=${MEETING_NOTES_DIR:-~/notes}
+LOG="$NOTES/.transcribe.log"
+mkdir -p "$REC" "$NOTES"
 
-# Timestamped status line, to the terminal and the log
-say() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
+# ASR model choice (decided from meeting-wer measurements, see docs/asr-eval.md). Defaults = old setup.
+# MEETING_ASR_MODEL: a whisper-ctranslate2 model name, or "parakeet" for Parakeet TDT 0.6B v3 (onnx-asr).
+ASR_MODEL=${MEETING_ASR_MODEL:-large-v3-turbo}
+ASR_BATCH=${MEETING_ASR_BATCH_SIZE:-8}
+PROMPT_ARGS=()
+if [ -n "${MEETING_ASR_INITIAL_PROMPT_FILE:-}" ]; then
+  # Whisper keeps only the last 223 tokens; in batched mode every chunk gets the prompt
+  PROMPT_ARGS=(--initial_prompt "$(tr '\n' ' ' < "$MEETING_ASR_INITIAL_PROMPT_FILE")")
+fi
+
+# parakeet <input> <output-dir> <format>: same result files as whisper(), via the adapter
+parakeet() {
+  local in="$1" dir="$2" fmt="$3" base
+  base="$dir/$(basename "${in%.wav}")"
+  python3 "$LIB/wer_asr.py" parakeet "$in" "$base" 2>>"$LOG" || return 1
+  [ "$fmt" = json ] && rm -f "$base.txt"
+  [ "$fmt" = txt ] && rm -f "$base.json"
+  rm -f "$base.raw.json"
+  [ -s "$base.$fmt" ]
+}
 
 # whisper <input> <output-dir> <format> [extra args]: GPU first, CPU if that produced nothing
 whisper() {
   local in="$1" dir="$2" fmt="$3" out
   shift 3
+  if [ "$ASR_MODEL" = parakeet ]; then parakeet "$in" "$dir" "$fmt"; return; fi
   out="$dir/$(basename "${in%.wav}").$fmt"
   # turbo + int8 + batching fits the 4 GB GPU; large-v3 in float16 failed on long meetings
-  whisper-ctranslate2 "$in" --model large-v3-turbo --language pl --device cuda \
-    --compute_type int8_float16 --batched True --batch_size 8 --vad_filter True \
-    --output_format "$fmt" --output_dir "$dir" "$@" 2>>"$LOG"
+  whisper-ctranslate2 "$in" --model "$ASR_MODEL" --language pl --device cuda \
+    --compute_type int8_float16 --batched True --batch_size "$ASR_BATCH" --vad_filter True \
+    --output_format "$fmt" --output_dir "$dir" ${PROMPT_ARGS[@]+"${PROMPT_ARGS[@]}"} "$@" 2>>"$LOG"
   if [ ! -s "$out" ]; then
     echo "CUDA run produced no transcript, retrying on CPU (see $LOG)" >&2
-    whisper-ctranslate2 "$in" --model large-v3-turbo --language pl --device cpu \
+    whisper-ctranslate2 "$in" --model "$ASR_MODEL" --language pl --device cpu \
       --compute_type int8 --vad_filter True \
-      --output_format "$fmt" --output_dir "$dir" "$@" 2>>"$LOG"
+      --output_format "$fmt" --output_dir "$dir" ${PROMPT_ARGS[@]+"${PROMPT_ARGS[@]}"} "$@" 2>>"$LOG"
   fi
   [ -s "$out" ]
 }
 
-transcribe() {
+# Speaker diarization of the remote track (off by default). Runs after Whisper has finished
+# and in its own process, so Whisper and pyannote never share the 4 GB of VRAM.
+DIARIZE=${MEETING_DIARIZE:-0}
+NOTES_AUTO=${MEETING_NOTES_AUTO:-0}
+NOTES_RUN=${MEETING_NOTES_RUN:-$LIB/../bin/meeting-notes-run}
+
+# merge_stereo <tmpdir> <base>: write $tmp/$base.txt; diarize the remote track when enabled
+merge_stereo() {
+  local tmp="$1" base="$2"
+  if [ "$DIARIZE" = 1 ]; then
+    if python3 "$LIB/diarize.py" "$tmp/remote.wav" "$tmp/diar.json" 2>>"$LOG" && [ -s "$tmp/diar.json" ] \
+      && python3 "$LIB/merge-tracks.py" --diarization "Remote=$tmp/diar.json" \
+        Remote "$tmp/remote.json" Me "$tmp/me.json" > "$tmp/$base.txt" 2>>"$LOG" \
+      && [ -s "$tmp/$base.txt" ]; then
+      return 0
+    fi
+    echo "diarization failed for $base, using plain Remote label" >>"$LOG"
+  fi
+  python3 "$LIB/merge-tracks.py" Remote "$tmp/remote.json" Me "$tmp/me.json" > "$tmp/$base.txt" \
+    && [ -s "$tmp/$base.txt" ]
+}
+
+# transcribe_audio <wav>: write $NOTES/<base>.txt
+transcribe_audio() {
   local f="$1" base tmp ok
   base=$(basename "${f%.wav}")
   # Old recordings are one mixed mono track
   if [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of csv=p=0 "$f")" != 2 ]; then
-    whisper "$f" "$OUT" txt
+    whisper "$f" "$NOTES" txt
     return
   fi
   # Stereo from meeting-rec: left = remote side, right = me. Transcribe each, then interleave.
@@ -44,11 +86,24 @@ transcribe() {
   # A silent track yields no JSON; treat it as empty rather than as a failure
   whisper "$tmp/remote.wav" "$tmp" json --word_timestamps True || echo '{"segments": []}' > "$tmp/remote.json"
   whisper "$tmp/me.wav" "$tmp" json --word_timestamps True || echo '{"segments": []}' > "$tmp/me.json"
-  python3 "$LIB/merge-tracks.py" Remote "$tmp/remote.json" Me "$tmp/me.json" > "$tmp/$base.txt" \
-    && [ -s "$tmp/$base.txt" ] && mv "$tmp/$base.txt" "$OUT/$base.txt"
+  merge_stereo "$tmp" "$base" && mv "$tmp/$base.txt" "$NOTES/$base.txt"
   ok=$?
   rm -rf "$tmp"
   return $ok
+}
+
+# transcribe <wav>: transcript + metadata copy + optional detached notes agent
+transcribe() {
+  local f="$1" base
+  base=$(basename "${f%.wav}")
+  transcribe_audio "$f" || return 1
+  # Metadata sidecar from meeting-rec, if any (consumers tolerate its absence)
+  [ -f "${f%.wav}.json" ] && cp "${f%.wav}.json" "$NOTES/$base.json" 2>>"$LOG"
+  if [ "$NOTES_AUTO" = 1 ]; then
+    # Detached; an agent failure never affects the transcript or the notification
+    ( nohup "$NOTES_RUN" "$NOTES/$base.txt" >>"$NOTES/.notes.log" 2>&1 </dev/null & ) 2>/dev/null
+  fi
+  return 0
 }
 
 process_pending() {
@@ -56,20 +111,29 @@ process_pending() {
   for f in "$REC"/meeting-*.wav; do
     [ -e "$f" ] || continue
     base=$(basename "${f%.wav}")
-    [ -s "$OUT/$base.txt" ] && continue                 # already transcribed
+    [ -s "$NOTES/$base.txt" ] && continue                 # already transcribed
     pgrep -f "ffmpeg.*$base" >/dev/null && continue      # still being recorded
-    say "Started:  $(basename "$f")"
-    if transcribe "$f"; then
-      say "Finished: $(basename "$f") -> $OUT/$base.txt"
-      notify-send "Transcript ready" "$base.txt"
-    else
-      say "Failed:   $(basename "$f") (see $LOG)"
-    fi
+    transcribe "$f" && notify-send "Transcript ready" "$base.txt"
   done
 }
 
-while true; do
-  process_pending
-  # Wake on a finished recording, or every 60 s as a safety net
-  inotifywait -qq -t 60 -e close_write "$REC"
-done
+main() {
+  # meeting-transcribe --once [FILE.wav ...]: with files, transcribe them into $MEETING_NOTES_DIR;
+  # without, process the backlog in $MEETING_REC_DIR. Then exit (no inotifywait).
+  if [ "${1:-}" = "--once" ]; then
+    shift
+    if [ "$#" -eq 0 ]; then process_pending; return 0; fi
+    local f rc=0
+    for f in "$@"; do transcribe "$f" || rc=1; done
+    return $rc
+  fi
+
+  while true; do
+    process_pending
+    # Wake on a finished recording, or every 60 s as a safety net
+    inotifywait -qq -t 60 -e close_write "$REC"
+  done
+}
+
+# Only run when executed; `source` loads the functions for tests
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
