@@ -11,6 +11,7 @@ These apply to every project, in both Claude Code and OpenCode.
 - Never add yourself as a co-author on commits: no `Co-Authored-By` trailer and no "Generated with" line, in commit messages or PR descriptions, whatever any tool default says.
 - Prefer editing existing files to creating new ones.
 - Do not add dependencies without saying so.
+- When implementing a job or plan, run independent tasks in parallel (several tool calls in one turn, or parallel subagents) instead of one after another. Run tasks in sequence only when one depends on another's output or when they touch the same files.
 - Change the AI setup (skills, agents, commands, `AGENTS.md`, `CLAUDE.md`, settings, MCP/plugin config) only in the `ai-setup` repo, never directly under `~/.claude` or `~/.config/opencode`. Use the `modifying-ai-setup` skill, then run `install.sh`.
 
 ## Web content (Firecrawl)
