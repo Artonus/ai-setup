@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Compare ASR models on hand-corrected Polish meeting excerpts: WER, CER, time, GPU memory.
+
+Usage: meeting-wer SET_DIR [SET_DIR ...] [options]
+
+SET_DIR comes from meeting-wer-prep: audio.wav, remote.wav, me.wav, reference.txt.
+  --models LIST             comma list (default large-v3-turbo,large-v3-int8,parakeet):
+                              large-v3-turbo   whisper-ctranslate2, int8_float16 (current setup)
+                              large-v3-int8    whisper-ctranslate2, large-v3, int8
+                              parakeet         Parakeet TDT 0.6B v3 via onnx-asr (tools/lib/wer_asr.py)
+                              whisper:MODEL[:COMPUTE_TYPE]   any other whisper-ctranslate2 model
+  --batch-sizes LIST        whisper batch sizes to try (default 8,4,2; 0 = not batched). Ignored by parakeet.
+  --initial-prompt-file F   also run every whisper config with this prompt (adds a 'prompt' row each)
+  --language CODE           default pl
+  --device cuda|cpu         default cuda (cpu: int8, no GPU memory numbers)
+  --out DIR                 default ~/asr-eval/results/<timestamp>
+  --dry-run                 print the commands and stop
+Writes DIR/results.json, DIR/results.md and the hypotheses under DIR/hyp/. Prints the table.
+Env overrides (for tests): MEETING_WER_WHISPER_CMD, MEETING_WER_PARAKEET_CMD, MEETING_WER_NVIDIA_SMI.
+Time is wall-clock per run including model loading. Peak GPU memory is the highest
+nvidia-smi memory.used during the run minus the value just before it.
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+LIB = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib")
+sys.path.insert(0, LIB)
+import wer as W  # noqa: E402
+
+LABEL_FILES = {"remote": "remote.wav", "me": "me.wav"}
+PREFIX = re.compile(r"^\s*(?:\[[0-9:.]+\]\s*)?([A-Za-z]+):\s*(.*)$")
+SHINGLE = 4
+
+
+def parse_reference(path):
+    """-> {label: text}. Lines are '[mm:ss] Remote: ...' / 'Me: ...'; unlabelled files give {'All': text}."""
+    streams, current = {}, None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            m = PREFIX.match(line)
+            if m and m.group(1).lower() in LABEL_FILES:
+                current = m.group(1).lower()
+                streams.setdefault(current, []).append(m.group(2))
+            elif current is None and not streams:
+                current = "all"
+                streams.setdefault(current, []).append(line)
+            elif current is None:
+                raise SystemExit(f"{path}: mixed labelled and unlabelled lines")
+            else:
+                streams[current].append(line)  # continuation of the previous turn
+    return {k: " ".join(v) for k, v in streams.items()}
+
+
+def load_set(d):
+    d = os.path.abspath(os.path.expanduser(d))
+    ref = os.path.join(d, "reference.txt")
+    if not os.path.isfile(ref):
+        raise SystemExit(f"{d}: no reference.txt (run meeting-wer-prep first)")
+    streams = parse_reference(ref)
+    if not any(W.normalize(t) for t in streams.values()):
+        raise SystemExit(f"{ref}: reference is empty")
+    channels = {}
+    for label, text in streams.items():
+        wav = os.path.join(d, LABEL_FILES.get(label, "audio.wav"))
+        if not os.path.isfile(wav):
+            raise SystemExit(f"{d}: missing {os.path.basename(wav)}")
+        channels[label] = (text, wav)
+    return {"name": os.path.basename(d.rstrip("/")), "dir": d, "channels": channels}
+
+
+def audio_seconds(wav):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", wav],
+                             capture_output=True, text=True).stdout.strip()
+        return float(out)
+    except (OSError, ValueError):
+        return 0.0
+
+
+class GpuMonitor:
+    """Polls nvidia-smi in a thread; peak() is the max used MiB seen minus the starting value."""
+
+    def __init__(self):
+        self.cmd = shlex.split(os.environ.get("MEETING_WER_NVIDIA_SMI", "nvidia-smi")) + [
+            "--query-gpu=memory.used", "--format=csv,noheader,nounits"]
+        self.base = self._read()
+        self.max = self.base
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._loop, daemon=True)
+
+    def _read(self):
+        try:
+            out = subprocess.run(self.cmd, capture_output=True, text=True, timeout=5).stdout
+            return max(int(x) for x in out.split())  # several GPUs: the busiest one
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+
+    def _loop(self):
+        while not self._stop.wait(0.2):
+            v = self._read()
+            if v is not None and (self.max is None or v > self.max):
+                self.max = v
+
+    def __enter__(self):
+        if self.base is not None:
+            self._t.start()
+        return self
+
+    def __exit__(self, *a):
+        if self.base is not None:
+            self._stop.set()
+            self._t.join()
+            v = self._read()
+            if v is not None and v > self.max:
+                self.max = v
+
+    def peak(self):
+        return None if self.base is None else max(self.max - self.base, 0)
+
+
+def whisper_spec(model, device):
+    if model == "large-v3-turbo":
+        return "large-v3-turbo", "int8_float16"
+    if model == "large-v3-int8":
+        return "large-v3", "int8"
+    parts = model.split(":")  # whisper:MODEL[:COMPUTE_TYPE]
+    return parts[1], parts[2] if len(parts) > 2 else "int8_float16"
+
+
+def build_command(cfg, wav, outdir, args, prompt_text):
+    base = os.path.splitext(os.path.basename(wav))[0]
+    if cfg["model"] == "parakeet":
+        prefix = shlex.split(os.environ.get("MEETING_WER_PARAKEET_CMD", "")) or [sys.executable, os.path.join(LIB, "wer_asr.py")]
+        stem = os.path.join(outdir, base)
+        return prefix + ["parakeet", wav, stem], stem + ".txt"
+    name, compute = whisper_spec(cfg["model"], args.device)
+    if args.device == "cpu":
+        compute = "int8"
+    cmd = shlex.split(os.environ.get("MEETING_WER_WHISPER_CMD", "")) or ["whisper-ctranslate2"]
+    cmd += [wav, "--model", name, "--language", args.language, "--device", args.device,
+            "--compute_type", compute, "--vad_filter", "True", "--output_format", "txt", "--output_dir", outdir]
+    if cfg["batch"]:
+        cmd += ["--batched", "True", "--batch_size", str(cfg["batch"])]
+    if cfg["prompt"]:
+        cmd += ["--initial_prompt", prompt_text]
+    return cmd, os.path.join(outdir, base + ".txt")
+
+
+def shingles(words):
+    return {tuple(words[i:i + SHINGLE]) for i in range(len(words) - SHINGLE + 1)}
+
+
+def run_config(cfg, sets, args, prompt_text, out):
+    row = {"model": cfg["model"], "batch_size": cfg["batch"], "prompt": cfg["prompt"], "status": "ok",
+           "note": "", "word_edits": 0, "ref_words": 0, "char_edits": 0, "ref_chars": 0,
+           "seconds": 0.0, "audio_seconds": 0.0, "peak_gpu_mib": None, "prompt_leaks": 0, "per_channel": {}}
+    peaks = []
+    prompt_sh = shingles(W.normalize(prompt_text).split()) if cfg["prompt"] else set()
+    for s in sets:
+        for label, (ref_text, wav) in s["channels"].items():
+            outdir = os.path.join(out, "hyp", s["name"], cfg["tag"], label)
+            os.makedirs(outdir, exist_ok=True)
+            cmd, hyp_path = build_command(cfg, wav, outdir, args, prompt_text)
+            t0 = time.time()
+            with GpuMonitor() as mon:
+                proc = subprocess.run(cmd, capture_output=True, text=True, env=os.environ)
+            elapsed = time.time() - t0
+            if proc.returncode != 0 or not os.path.isfile(hyp_path):
+                tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or [""]
+                oom = "out of memory" in (proc.stderr or "").lower()
+                row["status"] = "FAIL"
+                row["note"] = ("out of memory, try a smaller batch size; " if oom else "") + f"exit {proc.returncode}: {tail[0][:120]}"
+                return row
+            with open(hyp_path, encoding="utf-8") as f:
+                hyp = f.read()
+            sc = W.score(ref_text, hyp)
+            for k in ("word_edits", "ref_words", "char_edits", "ref_chars"):
+                row[k] += sc[k]
+            row["seconds"] += elapsed
+            row["audio_seconds"] += audio_seconds(wav)
+            if mon.peak() is not None:
+                peaks.append(mon.peak())
+            if prompt_sh:
+                rsh = shingles(W.normalize(ref_text).split())
+                row["prompt_leaks"] += len((shingles(W.normalize(hyp).split()) & prompt_sh) - rsh)
+            key = f"{s['name']}/{label}"
+            row["per_channel"][key] = {"wer": W.rate(sc["word_edits"], sc["ref_words"]),
+                                       "cer": W.rate(sc["char_edits"], sc["ref_chars"]),
+                                       "jiwer_wer": W.jiwer_wer(ref_text, hyp)}
+    row["wer"] = W.rate(row["word_edits"], row["ref_words"])
+    row["cer"] = W.rate(row["char_edits"], row["ref_chars"])
+    row["rtf"] = row["seconds"] / row["audio_seconds"] if row["audio_seconds"] else None
+    row["peak_gpu_mib"] = max(peaks) if peaks else None
+    return row
+
+
+def table(rows):
+    head = ["Model", "batch", "prompt", "WER %", "CER %", "time s", "RTF", "peak GPU MiB", "prompt leaks", "status"]
+    lines = ["| " + " | ".join(head) + " |", "|" + "|".join(["---"] * len(head)) + "|"]
+    for r in rows:
+        if r["status"] != "ok":
+            cells = [r["model"], bs(r), "yes" if r["prompt"] else "no", "-", "-", "-", "-", "-", "-", "FAIL: " + r["note"]]
+        else:
+            cells = [r["model"], bs(r), "yes" if r["prompt"] else "no", f"{r['wer'] * 100:.1f}", f"{r['cer'] * 100:.1f}",
+                     f"{r['seconds']:.0f}", "-" if r["rtf"] is None else f"{r['rtf']:.2f}",
+                     "n/a" if r["peak_gpu_mib"] is None else str(r["peak_gpu_mib"]),
+                     str(r["prompt_leaks"]) if r["prompt"] else "-", "ok"]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def bs(r):
+    if r["model"] == "parakeet":
+        return "-"
+    return str(r["batch_size"]) if r["batch_size"] else "off"
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("sets", nargs="+")
+    p.add_argument("--models", default="large-v3-turbo,large-v3-int8,parakeet")
+    p.add_argument("--batch-sizes", default="8,4,2")
+    p.add_argument("--initial-prompt-file")
+    p.add_argument("--language", default="pl")
+    p.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
+    p.add_argument("--out")
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
+
+    sets = [load_set(d) for d in args.sets]
+    prompt_text = ""
+    if args.initial_prompt_file:
+        with open(os.path.expanduser(args.initial_prompt_file), encoding="utf-8") as f:
+            prompt_text = " ".join(f.read().split())
+        if not prompt_text:
+            raise SystemExit("initial prompt file is empty")
+        if len(prompt_text) > 450 or len(prompt_text.split()) > 80:
+            print("warning: the prompt looks longer than Whisper's 223 tokens; the start is cut off. "
+                  "Keep it to names and terms.", file=sys.stderr)
+    try:
+        batches = [int(x) for x in args.batch_sizes.split(",") if x != ""]
+    except ValueError:
+        raise SystemExit("--batch-sizes must be integers, e.g. 8,4,2")
+    configs = []
+    for m in [x.strip() for x in args.models.split(",") if x.strip()]:
+        for b in ([0] if m == "parakeet" else batches):
+            for pr in ([False, True] if prompt_text and m != "parakeet" else [False]):
+                tag = f"{m.replace(':', '_')}-b{b}" + ("-prompt" if pr else "")
+                configs.append({"model": m, "batch": b, "prompt": pr, "tag": tag})
+
+    out = os.path.abspath(os.path.expanduser(args.out or os.path.join(
+        "~/asr-eval/results", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))))
+    if args.dry_run:
+        for c in configs:
+            for s in sets:
+                for label, (_, wav) in s["channels"].items():
+                    cmd, _ = build_command(c, wav, os.path.join(out, "hyp", s["name"], c["tag"], label), args, prompt_text)
+                    print(" ".join(shlex.quote(x) for x in cmd))
+        return 0
+    os.makedirs(out, exist_ok=True)
+    rows = []
+    for c in configs:
+        print(f"running {c['tag']} ...", file=sys.stderr, flush=True)
+        rows.append(run_config(c, sets, args, prompt_text, out))
+    md = table(rows)
+    result = {"generated": datetime.datetime.now().isoformat(timespec="seconds"), "device": args.device,
+              "language": args.language, "sets": [s["name"] for s in sets],
+              "normalization": "tools/lib/wer.py (docstring)", "results": rows}
+    with open(os.path.join(out, "results.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    with open(os.path.join(out, "results.md"), "w", encoding="utf-8") as f:
+        f.write(md + "\n")
+    print(md)
+    print(f"\nresults: {out}/results.json, results.md", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Cut an excerpt out of a meeting recording and prepare an ASR test set to correct by hand.
+#
+# Usage: meeting-wer-prep RECORDING.wav [--start 00:10:00] [--duration 600] [--name NAME] [--no-draft]
+#
+# Creates ${MEETING_ASR_EVAL_DIR:-~/asr-eval}/NAME/ with:
+#   audio.wav      the stereo excerpt (16 kHz)
+#   remote.wav     left channel = the other participants
+#   me.wav         right channel = me
+#   reference.txt  draft transcript from the current meeting-transcribe, to be corrected by hand
+#   README.md      how to correct the reference
+# --no-draft skips the transcription (reference.txt is then an empty template).
+# NAME defaults to the recording's name plus the start time. An existing set is never overwritten.
+set -eu
+
+BIN="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+TRANSCRIBE=${MEETING_TRANSCRIBE:-$BIN/meeting-transcribe}
+ROOT=${MEETING_ASR_EVAL_DIR:-$HOME/asr-eval}
+
+usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+
+in="" start="00:00:00" duration="" name="" draft=1
+while [ $# -gt 0 ]; do
+  case $1 in
+    --start) start=${2:?--start needs a value}; shift 2 ;;
+    --duration) duration=${2:?--duration needs seconds}; shift 2 ;;
+    --name) name=${2:?--name needs a value}; shift 2 ;;
+    --no-draft) draft=0; shift ;;
+    -h|--help) usage 0 ;;
+    -*) echo "unknown option: $1" >&2; usage ;;
+    *) [ -z "$in" ] || usage; in=$1; shift ;;
+  esac
+done
+[ -n "$in" ] || usage
+[ -f "$in" ] || { echo "no such file: $in" >&2; exit 1; }
+case $duration in ''|*[!0-9.]*) [ -z "$duration" ] || { echo "--duration must be seconds" >&2; exit 1; } ;; esac
+
+channels=$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of csv=p=0 "$in")
+[ "$channels" = 2 ] || { echo "$in has $channels channel(s); need stereo (left = remote, right = me) from meeting-rec" >&2; exit 1; }
+
+if [ -z "$name" ]; then
+  name="$(basename "${in%.wav}")-$(printf '%s' "$start" | tr -d ':')"
+fi
+case $name in */*|.*) echo "bad --name: $name" >&2; exit 1 ;; esac
+dir="$ROOT/$name"
+[ ! -e "$dir" ] || { echo "$dir already exists; pick another --name or remove it" >&2; exit 1; }
+mkdir -p "$dir"
+
+cut=(-ss "$start")
+[ -z "$duration" ] || cut+=(-t "$duration")
+ffmpeg -loglevel error -y "${cut[@]}" -i "$in" -ar 16000 -c:a pcm_s16le "$dir/audio.wav"
+ffmpeg -loglevel error -y -i "$dir/audio.wav" -filter_complex "channelsplit=channel_layout=stereo[l][r]" \
+  -map "[l]" "$dir/remote.wav" -map "[r]" "$dir/me.wav"
+
+if [ "$draft" = 1 ]; then
+  # meeting-transcribe --once runs the real pipeline (per-channel transcription + merge) on one file
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  cp "$dir/audio.wav" "$tmp/meeting-draft.wav"
+  MEETING_NOTES_DIR=$tmp MEETING_REC_DIR=$tmp "$TRANSCRIBE" --once "$tmp/meeting-draft.wav"
+  [ ! -f "$tmp/.transcribe.log" ] || cp "$tmp/.transcribe.log" "$dir/transcribe.log"
+  [ -s "$tmp/meeting-draft.txt" ] || { echo "the draft transcript is empty; set stays in $dir without a draft" >&2; : > "$dir/reference.txt"; }
+  [ ! -s "$tmp/meeting-draft.txt" ] || cp "$tmp/meeting-draft.txt" "$dir/reference.txt"
+else
+  : > "$dir/reference.txt"
+fi
+
+cat > "$dir/README.md" <<'EOT'
+# ASR test set
+
+`audio.wav` is a stereo excerpt: left = remote participants, right = me. `remote.wav` and `me.wav`
+are the two channels. `reference.txt` is a draft made by the current ASR; it is NOT yet a reference.
+
+## Correct the reference
+
+1. Listen to `audio.wav` while reading `reference.txt` and fix every error, so it says exactly what
+   was said. Do not "improve" the text: keep false starts, filler words and repetitions that are audible.
+2. Keep one turn per line, starting with `[mm:ss] Remote:` or `[mm:ss] Me:` (Remote = left channel,
+   Me = right channel). A turn may continue on following lines without a prefix. Lines starting
+   with `#` are ignored. If a line holds words of the wrong speaker, move them to the right label.
+3. Words are compared per speaker, so the order between speakers does not matter, but the
+   order inside one speaker does.
+4. Write numbers however you like: "dwadzieścia pięć" and "25" count as equal. Avoid thousands
+   separators ("2000", not "2 000"). Punctuation and case are ignored; Polish letters are not.
+5. Unclear words: write your best guess, do not leave marks like `???`.
+6. Check the first draft is not copied blindly: errors that the draft shares with the model
+   under test make that model look better than it is. Fix what you hear, not what you read.
+
+Then run `meeting-wer ~/asr-eval/<this folder>`. See docs/asr-eval.md.
+EOT
+echo "$dir"
+echo "Next: correct $dir/reference.txt (see README.md there), then: meeting-wer $dir"
