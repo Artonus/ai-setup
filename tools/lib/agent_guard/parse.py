@@ -28,6 +28,7 @@ class Invocation:
     raw: str = ""
     opaque: bool = False
     via_xargs: bool = False
+    wrapper: bool = False  # set by unwrap when the command is only a wrapper around an inner one
 
 
 def parse_command(command: str) -> List[Invocation]:

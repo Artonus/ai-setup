@@ -1,11 +1,16 @@
 """Policy rules: turn a shell command into an ask, deny or none decision.
 
-All tool names, verbs and patterns come from the policy file. The guard never
-returns "allow": "none" means no opinion, so the normal permission flow runs.
+Tool names, verbs, paths and patterns come from the policy file. The one
+exception is parser knowledge about how wrappers (sudo, env, docker exec, ssh,
+sh -c) hand a command line to another tool: those tables live in unwrap.py.
+The guard never returns "allow": "none" means no opinion, so the normal
+permission flow runs.
 """
 from __future__ import annotations
 
 import fnmatch
+import glob
+import itertools
 import json
 import os
 import re
@@ -13,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from agent_guard.parse import Invocation, parse_command
-from agent_guard.unwrap import unwrap
+from agent_guard.unwrap import shell_script_index, unwrap
 
 _ORDER = {"none": 0, "ask": 1, "deny": 2}
 
@@ -85,8 +90,30 @@ def _ask(rule: str, reason: str) -> Decision:
     return Decision("ask", rule, reason)
 
 
+def _git_config(inv: Invocation, cfg: dict) -> Optional[Decision]:
+    """Ask when a `git -c key=value` before the verb can run a command."""
+    argv, i = inv.argv, 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "-c" and i + 1 < len(argv):
+            key = argv[i + 1].partition("=")[0].lower()
+            if any(fnmatch.fnmatchcase(key, p.lower()) for p in cfg.get("dangerousConfig", [])):
+                return _ask("dynamic-sensitive", "%s (-c %s)" % (cfg.get("dangerousReason", "git -c can run a command"), key))
+            i += 2
+        elif a in cfg.get("valueOpts", []):
+            i += 2
+        elif a.startswith("-"):
+            i += 1
+        else:
+            break
+    return None
+
+
 def _git(inv: Invocation, policy: dict) -> Decision:
     cfg = policy.get("git", {})
+    dangerous = _git_config(inv, cfg)
+    if dangerous:
+        return dangerous
     pos = _positionals(inv, cfg.get("valueOpts", []))
     if not pos:
         return Decision()
@@ -100,7 +127,7 @@ def _git(inv: Invocation, policy: dict) -> Decision:
     for pat in cfg.get("patterns", []):
         if pat.get("verb") != verb:
             continue
-        hit = False
+        hit = bool(pat.get("always"))
         if "sub" in pat and len(pos) > 1 and pos[1][0] in pat["sub"]:
             hit = True
         for a in rest:
@@ -151,16 +178,51 @@ def _verb_words(policy: dict) -> List[str]:
     return sorted(words)
 
 
-def _tool_rules(inv: Invocation, policy: dict, names: List[str], command: str = "") -> Decision:
-    if inv.opaque and _mentions(command or inv.raw, names):
+def _name(inv: Invocation) -> str:
+    """Lower-cased basename of argv[0]: APFS is case-insensitive, so PSQL runs psql."""
+    return os.path.basename(inv.argv[0]).lower() if inv.argv else ""
+
+
+def _inline(inv: Invocation, policy: dict) -> bool:
+    """True for python -c, node -e and similar: the script text hides other tools."""
+    name = _name(inv)
+    flags = policy.get("inlineInterpreters", {}).get(name) or policy.get("inlineInterpreters", {}).get(name.rstrip("0123456789."))
+    if not flags:
+        return False
+    return any(a in flags or any(f.startswith("--") and a.startswith(f + "=") for f in flags) for a in inv.argv[1:])
+
+
+def _dynamic_script(inv: Invocation, policy: dict) -> bool:
+    """sh -c "$CMD": a script that is itself dynamic, like eval."""
+    if _name(inv) not in policy.get("dynamicScriptShells", []):
+        return False
+    idx = shell_script_index(inv.argv[1:])
+    if idx is None or not inv.dynamic[1 + idx]:
+        return False
+    return any(i.opaque or not i.argv or i.dynamic[0] for i in parse_command(inv.argv[1 + idx]))
+
+
+def _tool_rules(
+    inv: Invocation, policy: dict, names: List[str], command: str = "", verbs: Optional[List[str]] = None,
+    opaque_names: Optional[List[str]] = None,
+) -> Decision:
+    verbs = _verb_words(policy) if verbs is None else verbs
+    if (inv.opaque or _inline(inv, policy)) and _mentions(command or inv.raw, opaque_names or names):
         return _ask("dynamic-sensitive", "command cannot be analysed and mentions a sensitive tool")
     if not inv.argv:
         return Decision()
-    if inv.dynamic[0] and (_mentions(command, names) or any(w in _verb_words(policy) for w in inv.argv[1:])):
+    git_cfg = policy.get("git", {})
+    if inv.argv[0].startswith(tuple(e + "=" for e in git_cfg.get("dangerousEnv", ()))) or (
+        _name(inv) == "env" and any(a.startswith(tuple(e + "=" for e in git_cfg.get("dangerousEnv", ()))) for a in inv.argv[1:])
+    ):
+        return _ask("dynamic-sensitive", git_cfg.get("dangerousReason", "environment can run a command"))
+    if inv.dynamic[0] and (_mentions(command, names) or any(w in verbs for w in inv.argv[1:])):
         return _ask("dynamic-sensitive", "dynamic command name next to a sensitive tool or verb")
-    name = os.path.basename(inv.argv[0])
+    name = _name(inv)
     if name in policy.get("failClosedTools", []):
         return _ask("dynamic-sensitive", "%s hides the command that runs" % name)
+    if _dynamic_script(inv, policy):
+        return _ask("dynamic-sensitive", "%s -c runs a dynamic script that hides the command" % name)
     if inv.via_xargs and name in names:
         return _ask("dynamic-sensitive", "xargs %s runs with unknown targets" % name)
     for client in policy.get("dbClients", []):
@@ -278,7 +340,28 @@ def _safe_target(path: str, policy: dict) -> bool:
     return any(fnmatch.fnmatchcase(path, g) for g in policy.get("fileRules", {}).get("safeTargets", []))
 
 
-def _destructive_target(word: str, cwd: Optional[str], policy: dict, ctx: Ctx, verb: str) -> Decision:
+def _project_guard(path: str, policy: dict, ctx: Ctx, root_counts: bool = True) -> str:
+    """Reason when path is the project root, an ancestor of a protected entry, or inside one."""
+    if not ctx.project_dir:
+        return ""
+    protected = policy.get("fileRules", {}).get("protectedInProject", [])
+    for form in _forms(path):
+        for root in {_lex(ctx.project_dir), _real(ctx.project_dir)}:
+            if root_counts and form == root:
+                return "the project root"
+            wild = policy.get("fileRules", {}).get("rootWildcard")
+            if root_counts and wild and re.match(wild, os.path.basename(form)) and os.path.dirname(form) == root:
+                return "every file in the project root"
+            for name in protected:
+                prot = os.path.join(root, name)
+                if _under(form, prot) or (root_counts and _under(prot, form)):
+                    return os.path.join(root, name)
+    return ""
+
+
+def _destructive_target(
+    word: str, cwd: Optional[str], policy: dict, ctx: Ctx, verb: str, root_counts: bool = True
+) -> Decision:
     rule = policy.get("fileRules", {}).get("rule", "file-destructive")
     path = resolve_target(word, cwd, ctx)
     if path is None:
@@ -290,6 +373,9 @@ def _destructive_target(word: str, cwd: Optional[str], policy: dict, ctx: Ctx, v
         return prot
     if _outside(path, ctx):
         return _ask(rule, "%s target %s is outside the project" % (verb, path))
+    hit = _project_guard(path, policy, ctx, root_counts)
+    if hit:
+        return _ask(rule, "%s target %s would remove %s" % (verb, path, hit))
     return Decision()
 
 
@@ -328,11 +414,46 @@ def _find_paths(argv: List[str]) -> List[str]:
     return paths or ["."]
 
 
+def _in_place(inv: Invocation, name: str, cfg: dict, policy: dict, ctx: Ctx, cwd: Optional[str]) -> List[Decision]:
+    """sed -i / perl -i: the file operands are overwritten."""
+    args = inv.argv[1:]
+    inplace, skip = False, False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in cfg.get("valueOpts", []):
+            skip = True
+        elif a in cfg.get("long", []) or any(f.startswith("--") and a.startswith(f + "=") for f in cfg.get("long", [])):
+            inplace = True
+        elif a.startswith("-") and not a.startswith("--") and "i" in a[1:]:
+            inplace = True
+    if not inplace:
+        return []
+    words = [w for w, _ in _positionals(inv, cfg.get("valueOpts", [])) if w != ""]
+    if not any(a in cfg.get("scriptOpts", []) for a in args):
+        words = words[1:]  # the first operand is the script
+    return [_write_target(w, cwd, policy, ctx, name) for w in words]
+
+
+def _rsync(inv: Invocation, cfg: dict, policy: dict, ctx: Ctx, cwd: Optional[str]) -> List[Decision]:
+    """rsync --delete: the destination loses files that are not in the source."""
+    if not any(a.startswith(tuple(cfg.get("deletePrefixes", ["--delete"]))) for a in inv.argv[1:]):
+        return []
+    pos = [w for w, _ in _positionals(inv, cfg.get("valueOpts", []))]
+    if len(pos) < 2:
+        return []
+    dest = pos[-1]
+    rule = policy.get("fileRules", {}).get("rule", "file-destructive")
+    if re.match(r"^[^/]*:", dest):
+        return [_ask(rule, "rsync --delete to remote %s" % dest)]
+    return [_destructive_target(dest, cwd, policy, ctx, "rsync --delete", False)]
+
+
 def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> Decision:
     cfg = policy.get("fileRules", {})
     rule = cfg.get("rule", "file-destructive")
     out: List[Decision] = []
-    name = os.path.basename(inv.argv[0]) if inv.argv else ""
+    name = _name(inv)
     destructive = cfg.get("destructive", {})
     overwrite = cfg.get("overwrite", {})
     if inv.via_xargs and (name in destructive or name in overwrite):
@@ -344,12 +465,13 @@ def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> 
         find = cfg.get("find", {})
         argv = inv.argv
         hit = any(a in find.get("actions", []) for a in argv)
+        unfiltered = not any(a in find.get("filters", []) for a in argv)
         for i, a in enumerate(argv[:-1]):
-            if a in find.get("execFlags", []) and os.path.basename(argv[i + 1]) in destructive:
+            if a in find.get("execFlags", []) and os.path.basename(argv[i + 1]).lower() in destructive:
                 hit = True
         if hit:
             for w in _find_paths(argv):
-                out.append(_destructive_target(w, cwd, policy, ctx, "find"))
+                out.append(_destructive_target(w, cwd, policy, ctx, "find", unfiltered))
     elif name == "dd":
         for a in inv.argv[1:]:
             if a.startswith(cfg.get("ddOutput", "of=")):
@@ -357,6 +479,12 @@ def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> 
     elif name in overwrite:
         vopts = overwrite[name]
         pos = [w for w, _ in _positionals(inv, vopts)]
+        if name in cfg.get("moveSources", []):
+            for w in pos:
+                p = resolve_target(w, cwd, ctx)
+                hit = _project_guard(p, policy, ctx) if p else ""
+                if hit:
+                    out.append(_ask(rule, "%s of %s would remove %s" % (name, w, hit)))
         tdir = None
         for i, a in enumerate(inv.argv[:-1]):
             if a in ("-t", "--target-directory"):
@@ -373,6 +501,13 @@ def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> 
                         out.append(_write_target(os.path.join(dpath, base), cwd, policy, ctx, name))
             else:
                 out.append(_write_target(dest, cwd, policy, ctx, name))
+    elif name in cfg.get("tee", {}).get("tools", []):
+        for w, _ in _positionals(inv, cfg.get("tee", {}).get("valueOpts", [])):
+            out.append(_write_target(w, cwd, policy, ctx, name))
+    elif name in cfg.get("inPlace", {}):
+        out.extend(_in_place(inv, name, cfg["inPlace"][name], policy, ctx, cwd))
+    elif name == "rsync":
+        out.extend(_rsync(inv, cfg.get("rsync", {}), policy, ctx, cwd))
     for op, target in inv.redirects:
         if op.lstrip("0123456789") in cfg.get("writeRedirects", []):
             if target.isdigit() or target == "-":
@@ -381,45 +516,156 @@ def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> 
     return _worst(out)
 
 
+_GLOB_CHARS = re.compile(r"[*?\[]")
+
+
+def _safe_tool(inv: Invocation, policy: dict) -> bool:
+    """Tools that name a path without reading its content (ls, chmod, git add ...)."""
+    name = _name(inv)
+    for entry in policy.get("secretSafeTools", []):
+        parts = entry.split()
+        if parts[0] != name:
+            continue
+        if len(parts) == 1:
+            return True
+        pos = [w for w, _ in _positionals(inv, policy.get("git", {}).get("valueOpts", []) if name == "git" else [])]
+        if pos[: len(parts) - 1] == parts[1:]:
+            return True
+    return False
+
+
+def _candidates(word: str) -> List[str]:
+    """Path candidates inside a word: the word, and the parts after `=`, `@` and `:`."""
+    if re.search(r"\s", word):
+        return []
+    out = [] if word.startswith("-") else [word]
+    for sep in "=@:":
+        k = word.find(sep)
+        while k >= 0:
+            out.append(word[k + 1 :])
+            k = word.find(sep, k + 1)
+    return [c for c in dict.fromkeys(out) if c and not c.startswith("//")]
+
+
+def _secret_dirs(policy: dict, ctx: Ctx) -> List[str]:
+    dirs = []
+    for pat in policy.get("secretPaths", []):
+        if pat.startswith("**/"):
+            continue
+        exp = _expand_home(pat, ctx)
+        dirs.append(_lex(os.path.dirname(_GLOB_CHARS.split(exp)[0] + "x") if _GLOB_CHARS.search(exp) else os.path.dirname(exp)))
+    return list(dict.fromkeys(dirs))
+
+
+def _secret_path(path: str, recursive: bool, policy: dict, ctx: Ctx) -> bool:
+    if _is_secret(path, policy, ctx):
+        return True
+    for d in _secret_dirs(policy, ctx):
+        for form in _forms(path):
+            if form == d or (recursive and _under(d, form)):
+                return True
+    return False
+
+
 def _secret_reads(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> Decision:
+    """Deny any word that names a secret path, unless the tool only names it."""
     words: List[str] = []
-    if inv.argv and os.path.basename(inv.argv[0]) in policy.get("secretReadTools", []):
-        words.extend(a for a in inv.argv[1:] if not a.startswith("-") or a == "-")
+    recursive = False
+    if inv.argv and not inv.wrapper and not _safe_tool(inv, policy):
+        words.extend(inv.argv[1:])
+        if _name(inv) in policy.get("fileRules", {}).get("overwrite", {}) and not any(
+            x in ("-t", "--target-directory") for x in inv.argv[1:]
+        ):
+            pos = [w for w, _ in _positionals(inv, policy["fileRules"]["overwrite"][_name(inv)])]
+            if len(pos) > 1:  # the destination is written, not read: the write rules judge it
+                words.reverse()
+                words.remove(pos[-1])
+                words.reverse()
+        recursive = any(a == "--recursive" or (a.startswith("-") and not a.startswith("--") and re.search("[rR]", a[1:])) for a in inv.argv[1:])
     words.extend(t for op, t in inv.redirects if op.lstrip("0123456789") == "<")
     for w in words:
-        path = resolve_target(w, cwd, ctx)
-        if re.match(r"^~[^/]", w):  # ~user/rest: test rest under our home too
-            rest = "/" + w.partition("/")[2] if "/" in w else ""
-            alt = resolve_target("~" + rest, cwd, ctx)
-            if alt is not None and _is_secret(alt, policy, ctx):
-                return Decision("deny", "secret-read", "%s holds secrets; do not read it" % w)
-        if path is not None and _is_secret(path, policy, ctx):
-            return Decision("deny", "secret-read", "%s holds secrets; do not read it" % path)
+        for cand in _candidates(w):
+            paths = []
+            path = resolve_target(cand, cwd, ctx)
+            if path is None and cwd is None and not os.path.isabs(cand) and not re.search(r"[$`~]", cand):
+                path = _lex("/unknown-cwd/" + cand)  # unknown directory: `**/` patterns still match
+            if re.match(r"^~[^/]", cand):  # ~user/rest: test rest under our home too
+                rest = "/" + cand.partition("/")[2] if "/" in cand else ""
+                paths.append(resolve_target("~" + rest, cwd, ctx))
+            if path is not None and _GLOB_CHARS.search(path):
+                paths.extend(itertools.islice(glob.iglob(path), 200))
+            else:
+                paths.append(path)
+            for p in paths:
+                if p is not None and _secret_path(p, recursive, policy, ctx):
+                    return Decision("deny", "secret-read", "%s holds secrets; do not read it" % (p if cand == w else w))
     return Decision()
 
 
-def _invocation(inv: Invocation, policy: dict, names: List[str], command: str, ctx: Ctx, cwd: Optional[str]) -> Decision:
+def _tmp_script(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> Decision:
+    """A script under the temp dir is unreviewed code: ask before running it."""
+    if not inv.argv:
+        return Decision()
+    name, words = _name(inv), []
+    if "/" in inv.argv[0]:
+        words.append(inv.argv[0])
+    if name in policy.get("scriptRunners", []):
+        args = inv.argv[1:]
+        if name in ("source", ".") or shell_script_index(args) is None:
+            words.extend(a for a in args if not a.startswith("-"))
+            words = words[:1] if "/" not in inv.argv[0] else words
+    for w in words:
+        path = resolve_target(w, cwd, ctx)
+        if path and not _outside_tmp(path, ctx) and _outside_project(path, ctx):
+            return _ask("tmp-script", "%s runs a script from the temp dir" % (name or w))
+    return Decision()
+
+
+def _outside_tmp(path: str, ctx: Ctx) -> bool:
+    return not any(_under(_real(path), _real(r)) for r in ctx.tmp_roots if r)
+
+
+def _outside_project(path: str, ctx: Ctx) -> bool:
+    return not (ctx.project_dir and _under(_real(path), _real(ctx.project_dir)))
+
+
+def _invocation(
+    inv: Invocation, policy: dict, names: List[str], command: str, ctx: Ctx, cwd: Optional[str],
+    verbs: Optional[List[str]] = None, opaque_names: Optional[List[str]] = None,
+) -> Decision:
     return _worst(
-        [_tool_rules(inv, policy, names, command), _file_rules(inv, policy, ctx, cwd), _secret_reads(inv, policy, ctx, cwd)]
+        [
+            _tool_rules(inv, policy, names, command, verbs, opaque_names),
+            _file_rules(inv, policy, ctx, cwd),
+            _secret_reads(inv, policy, ctx, cwd),
+            _tmp_script(inv, policy, ctx, cwd),
+        ]
     )
 
 
 def _next_cwd(inv: Invocation, cwd: Optional[str], ctx: Ctx) -> Optional[str]:
     """Working directory after the invocation, following `cd` best effort."""
-    if not inv.argv or os.path.basename(inv.argv[0]) != "cd":
+    name = _name(inv)
+    if name in ("pushd", "popd"):
+        return None  # a directory stack: not tracked, relative targets then ask
+    if name != "cd":
         return cwd
     args = [a for a in inv.argv[1:] if a != "--" and not (a.startswith("-") and a != "-")]
     if not args:
         return _lex(ctx.home) if ctx.home else None
+    if args[0] == "-":
+        return None  # the previous directory is unknown
     return resolve_target(args[0], cwd, ctx)
 
 
 def explain_bash(command: str, policy: dict, ctx: Ctx) -> List[Tuple[Invocation, Decision]]:
     names = _sensitive_names(policy)
+    verbs = _verb_words(policy)
+    opaque_names = sorted(set(names) | set(policy.get("fileRules", {}).get("destructive", {})))
     cwd: Optional[str] = ctx.cwd or ctx.project_dir or None
     out: List[Tuple[Invocation, Decision]] = []
     for inv in unwrap(parse_command(command)):
-        out.append((inv, _invocation(inv, policy, names, command, ctx, cwd)))
+        out.append((inv, _invocation(inv, policy, names, command, ctx, cwd, verbs, opaque_names)))
         cwd = _next_cwd(inv, cwd, ctx)
     return out
 

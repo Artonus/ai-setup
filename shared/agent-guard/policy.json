@@ -1,6 +1,9 @@
 {
   "mode": "shadow",
-  "dbClients": ["psql", "mysql", "mariadb", "mongosh", "redis-cli", "sqlite3", "pg_restore", "kubectl cnpg"],
+  "dbClients": ["psql", "mysql", "mariadb", "mongosh", "redis-cli", "sqlite3", "pg_restore", "pg_dumpall", "dropdb", "createdb", "mongo", "kubectl-cnpg", "kubectl cnpg"],
+  "dynamicScriptShells": ["sh", "bash", "zsh", "dash", "ksh"],
+  "scriptRunners": ["sh", "bash", "zsh", "dash", "ksh", "source", "."],
+  "inlineInterpreters": {"python": ["-c"], "python3": ["-c"], "node": ["-e", "--eval", "-p"], "perl": ["-e", "-E"], "ruby": ["-e"]},
   "failClosedTools": ["eval"],
   "verbGated": {
     "kubectl": {
@@ -57,13 +60,23 @@
   "git": {
     "rule": "git-destructive",
     "valueOpts": ["-C", "-c", "--git-dir", "--work-tree", "--namespace"],
+    "dangerousConfig": ["alias.*", "core.sshcommand", "core.pager", "*.command"],
+    "dangerousEnv": ["GIT_SSH_COMMAND"],
+    "dangerousReason": "git -c or GIT_SSH_COMMAND can run an arbitrary command",
     "patterns": [
       {"verb": "push", "args": ["--force", "--delete", "--mirror"], "argPrefixes": ["--force-with-lease", "+", ":"], "shortChars": ["f", "d"], "reason": "git push can overwrite or delete remote history"},
       {"verb": "reset", "args": ["--hard"], "reason": "git reset --hard discards local changes"},
       {"verb": "branch", "args": ["--delete"], "shortChars": ["D", "d"], "reason": "git branch delete removes a branch"},
+      {"verb": "branch", "args": ["--force"], "shortChars": ["f", "M"], "reason": "git branch -f or -M moves or overwrites a branch"},
+      {"verb": "rebase", "always": true, "reason": "git rebase rewrites history; whether the commits are already pushed cannot be known statically"},
+      {"verb": "filter-branch", "always": true, "reason": "git filter-branch rewrites history"},
+      {"verb": "filter-repo", "always": true, "reason": "git filter-repo rewrites history"},
+      {"verb": "update-ref", "args": ["--delete"], "shortChars": ["d"], "reason": "git update-ref -d deletes a ref"},
+      {"verb": "tag", "args": ["--delete"], "shortChars": ["d"], "reason": "git tag -d deletes a tag"},
+      {"verb": "switch", "args": ["--force", "--discard-changes"], "shortChars": ["f", "C"], "reason": "git switch -f discards local changes"},
       {"verb": "clean", "args": ["--force"], "shortChars": ["f"], "reason": "git clean -f deletes untracked files"},
-      {"verb": "checkout", "args": [".", "--"], "reason": "git checkout . or -- discards local changes"},
-      {"verb": "restore", "args": ["."], "reason": "git restore . discards local changes"},
+      {"verb": "checkout", "args": [".", "--", "--force"], "shortChars": ["f"], "reason": "git checkout . or -- discards local changes"},
+      {"verb": "restore", "args": [".", "--worktree"], "shortChars": ["W"], "reason": "git restore of the worktree discards local changes"},
       {"verb": "stash", "sub": ["drop", "clear"], "reason": "git stash drop or clear loses stashed work"},
       {"verb": "reflog", "sub": ["expire"], "reason": "git reflog expire removes recovery points"},
       {"verb": "gc", "argPrefixes": ["--prune"], "reason": "git gc --prune deletes unreachable objects"}
@@ -76,8 +89,8 @@
     "paths": ["~/.claude", "~/.config/opencode"]
   },
   "secretPaths": ["~/.ssh/id_*", "~/.aws/credentials", "**/.env", "**/.env.*"],
-  "secretExcept": ["*.pub"],
-  "secretReadTools": ["cat", "head", "tail", "less", "more", "grep", "cp", "mv", "source", "."],
+  "secretExcept": ["*.pub", "*.example", "*.sample", "*.template"],
+  "secretSafeTools": ["ls", "stat", "chmod", "chown", "test", "[", "[[", "cd", "pushd", "rm", "unlink", "touch", "echo", "printf", "ssh", "ssh-add", "ssh-keygen", "git add", "git check-ignore"],
   "pathTools": {"read": "read", "write": "write", "edit": "edit", "multiedit": "edit", "notebookedit": "edit"},
   "fileRules": {
     "rule": "file-destructive",
@@ -89,9 +102,20 @@
     },
     "overwrite": {
       "mv": ["-t", "--target-directory", "-S", "--suffix"],
-      "cp": ["-t", "--target-directory", "-S", "--suffix"]
+      "cp": ["-t", "--target-directory", "-S", "--suffix"],
+      "ln": ["-t", "--target-directory", "-S", "--suffix"],
+      "install": ["-m", "--mode", "-o", "--owner", "-g", "--group", "-t", "--target-directory", "-S", "--suffix"]
     },
-    "find": {"actions": ["-delete"], "execFlags": ["-exec", "-execdir", "-ok", "-okdir"]},
+    "protectedInProject": [".git"],
+    "rootWildcard": "^[*.?]+$",
+    "tee": {"tools": ["tee"], "valueOpts": []},
+    "moveSources": ["mv"],
+    "inPlace": {
+      "sed": {"valueOpts": ["-e", "--expression", "-f", "--file", "-l", "--line-length"], "scriptOpts": ["-e", "--expression", "-f", "--file"], "long": ["--in-place"]},
+      "perl": {"valueOpts": ["-e", "-E", "-I", "-M", "-m"], "scriptOpts": ["-e", "-E"], "long": []}
+    },
+    "rsync": {"deletePrefixes": ["--delete", "--del"], "valueOpts": ["-e", "--rsh", "-f", "--filter", "--exclude", "--include", "--exclude-from", "--include-from", "--files-from", "--port", "--bwlimit", "--log-file", "--backup-dir", "--suffix", "--partial-dir", "-T", "--temp-dir", "--link-dest", "--compare-dest", "--max-size", "--min-size", "--chmod", "--chown", "--rsync-path", "--timeout", "--password-file"]},
+    "find": {"actions": ["-delete"], "execFlags": ["-exec", "-execdir", "-ok", "-okdir"], "filters": ["-name", "-iname", "-path", "-ipath", "-wholename", "-regex", "-iregex", "-type", "-newer", "-mtime", "-mmin", "-atime", "-ctime", "-size", "-user", "-group", "-perm", "-empty", "-lname"]},
     "ddOutput": "of=",
     "writeRedirects": [">", ">>", ">|", "&>", "&>>", ">&"],
     "safeTargets": ["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/*"]

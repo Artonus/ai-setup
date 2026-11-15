@@ -88,7 +88,7 @@ test_ag_paths_secret_reads() {
   assert_eq deny "$(ag_pcheck 'grep KEY src/.env.local' | cut -f1)" ".env.* variant"
   assert_eq deny "$(ag_pcheck 'cat < ~/.ssh/id_rsa' | cut -f1)" "input redirect"
   assert_eq deny "$(ag_pcheck 'cp ~/.ssh/id_rsa /tmp/x' | cut -f1)" "cp of a key"
-  assert_eq deny "$(ag_pcheck 'cat .env.example' | cut -f1)" ".env.* includes .env.example"
+  assert_eq none "$(ag_pcheck 'cat .env.example' | cut -f1)" ".env.example is a template, not a secret"
   assert_eq none "$(ag_pcheck 'ls ~/.ssh/id_rsa' | cut -f1)" "ls is not a read tool"
   assert_eq deny "$(ag_ppath Read "$T/home/.aws/credentials" | cut -f1)" "Read tool on credentials"
   rm -rf "$T"
@@ -126,4 +126,47 @@ test_ag_paths_tilde_user_forms() {
   assert_eq deny "$(ag_pcheck 'cat ~nosuchuser_zz/.ssh/id_rsa' | cut -f1)" "cat unresolvable ~user key"
   assert_eq none "$(ag_pcheck 'ls ~root' | cut -f1)" "ls ~root"
   rm -rf "$AG_T"
+}
+
+test_ag_paths_project_root_and_git_are_protected() {
+  ag_path_setup
+  local T="$AG_T"
+  mkdir -p "$T/proj/.git/refs"
+  assert_eq ask "$(ag_pcheck "rm -rf \"$T/proj\"" | cut -f1)" "absolute project root"
+  assert_eq ask "$(ag_pcheck 'cd .. && rm -rf proj' | cut -f1)" "project root from its parent"
+  assert_eq file-destructive "$(ag_pcheck 'rm -rf .git' | cut -f2)" ".git rule id"
+  assert_eq ask "$(ag_pcheck 'rm -rf .git/refs' | cut -f1)" "inside .git"
+  assert_eq ask "$(ag_pcheck 'rm -rf ./*' | cut -f1)" "root wildcard"
+  assert_eq none "$(ag_pcheck 'cd src && rm -rf *' | cut -f1)" "wildcard in a subdirectory"
+  assert_eq none "$(ag_pcheck 'rm build/out.o' | cut -f1)" "ordinary file"
+  assert_eq ask "$(ag_pcheck 'mv .git /tmp/x' | cut -f1)" "mv of .git"
+  assert_eq none "$(ag_pcheck 'mv src/a build/a' | cut -f1)" "mv of ordinary file"
+  assert_eq none "$(ag_ppath Write "$T/proj/.git/hooks/x" | cut -f1)" "Write into .git is out of scope"
+  rm -rf "$T"
+}
+
+test_ag_paths_writers_and_secret_globs() {
+  ag_path_setup
+  local T="$AG_T"
+  : >"$T/proj/.env"
+  : >"$T/home/.ssh/id_rsa"
+  assert_eq ask "$(ag_pcheck 'rsync -a --delete src/ ~/Documents/' | cut -f1)" "rsync --delete outside"
+  assert_eq none "$(ag_pcheck 'rsync -a --delete src/ build/' | cut -f1)" "rsync --delete inside"
+  assert_eq deny "$(ag_pcheck 'cat ~/.ssh/i*' | cut -f1)" "glob over keys"
+  assert_eq deny "$(ag_pcheck 'cat .e*' | cut -f1)" "glob over .env"
+  assert_eq none "$(ag_pcheck 'cat nomatch*' | cut -f1)" "glob without match"
+  assert_eq deny "$(ag_pcheck 'pushd ~ && cat .env' | cut -f1)" ".env after pushd (unknown cwd)"
+  assert_eq ask "$(ag_pcheck 'pushd ~; rm -rf Documents' | cut -f1)" "pushd makes relative rm ask"
+  assert_eq ask "$(ag_pcheck 'install -m 600 x ~/.ssh/id_rsa' | cut -f1)" "install onto a key asks, not denies"
+  assert_eq none "$(ag_pcheck 'env FOO=1 ls ~/.ssh' | cut -f1)" "wrapper around a safe tool"
+  rm -rf "$T"
+}
+
+test_ag_paths_tmp_script_not_in_project() {
+  ag_path_setup
+  local T="$AG_T"
+  assert_eq ask "$(ag_pcheck "bash \"$T/tmp/x.sh\"" | cut -f1)" "script in TMPDIR"
+  assert_eq tmp-script "$(ag_pcheck 'sh $TMPDIR/x.sh' | cut -f2)" "tmp-script rule id"
+  assert_eq none "$(ag_pcheck 'bash ./deploy.sh' | cut -f1)" "project script"
+  rm -rf "$T"
 }

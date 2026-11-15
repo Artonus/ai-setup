@@ -1,4 +1,8 @@
-"""Strip command wrappers and follow nested shells to find inner commands."""
+"""Strip command wrappers and follow nested shells to find inner commands.
+
+The wrapper, shell, ssh and container tables below are parser knowledge about
+how other tools take a command line; they are code on purpose, not policy.
+"""
 from __future__ import annotations
 
 import os
@@ -78,8 +82,8 @@ def _wrapper_offset(name: str, args: List[str]) -> Optional[int]:
     return None
 
 
-def _shell_script(args: List[str]) -> Optional[str]:
-    """The -c script of a shell invocation, or None when it has none."""
+def shell_script_index(args: List[str]) -> Optional[int]:
+    """Index in args of the -c script of a shell invocation, or None."""
     i = 0
     while i < len(args):
         a = args[i]
@@ -92,9 +96,15 @@ def _shell_script(args: List[str]) -> Optional[str]:
         if not a.startswith("-"):
             return None  # script file
         if "c" in a[1:]:
-            return args[i + 1] if i + 1 < len(args) else None
+            return i + 1 if i + 1 < len(args) else None
         i += 1
     return None
+
+
+def _shell_script(args: List[str]) -> Optional[str]:
+    """The -c script of a shell invocation, or None when it has none."""
+    idx = shell_script_index(args)
+    return args[idx] if idx is not None else None
 
 
 def _env_split_string(args: List[str]) -> Optional[str]:
@@ -148,6 +158,39 @@ def _ssh_command(args: List[str]) -> List[str]:
     return cmd[1:] if cmd[:1] == ["--"] else cmd
 
 
+_DOCKER_GLOBAL = {"--context", "-c", "-H", "--host", "--config", "-l", "--log-level", "--tlscacert", "--tlscert", "--tlskey",
+                  "--connection", "--identity", "--url", "--remote", "-f", "--file", "-p", "--project-name", "--profile",
+                  "--project-directory", "--env-file", "--ansi", "--parallel"}
+_DOCKER_EXEC = {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys", "--index"}
+_DOCKER_RUN = _DOCKER_EXEC | {"--name", "-v", "--volume", "-p", "--publish", "--network", "--net", "--mount", "--entrypoint",
+                              "-l", "--label", "--add-host", "--hostname", "-h", "--platform", "--pull", "--restart",
+                              "--cpus", "-m", "--memory", "--cap-add", "--cap-drop", "--device", "--user-ns", "--tmpfs",
+                              "--dns", "--link", "--log-driver", "--label-file", "--cidfile", "--pid", "--ipc", "--shm-size",
+                              "--ulimit", "--security-opt", "--workdir", "-a", "--attach", "--expose", "--group-add"}
+
+
+def _container_offset(name: str, args: List[str]) -> Optional[int]:
+    """Offset into args of the command a docker/podman exec or run starts, or None."""
+    i = _skip_opts(args, _DOCKER_GLOBAL)
+    if i >= len(args):
+        return None
+    base = i
+    sub = args[i]
+    if sub == "container" and i + 1 < len(args):
+        base, sub = i + 1, args[i + 1]
+    if sub == "compose" and base + 1 < len(args):
+        k = base + 1 + _skip_opts(args[base + 1 :], _DOCKER_GLOBAL)
+        if k >= len(args) or args[k] not in ("exec", "run"):
+            return None
+        base, sub = k, args[k]
+    if sub not in ("exec", "run"):
+        return None
+    rest = args[base + 1 :]
+    j = _skip_opts(rest, _DOCKER_EXEC if sub == "exec" else _DOCKER_RUN)
+    cmd = base + 1 + j + 1  # skip the container, service or image name
+    return cmd if cmd < len(args) else None
+
+
 def _step(inv: Invocation) -> List[Invocation]:
     argv = inv.argv
     if not argv:
@@ -157,7 +200,7 @@ def _step(inv: Invocation) -> List[Invocation]:
         k += 1
     if k:
         return _rest(inv, k)
-    name, args = os.path.basename(argv[0]), argv[1:]
+    name, args = os.path.basename(argv[0]).lower(), argv[1:]
 
     if name == "env":
         split = _env_split_string(args)
@@ -165,16 +208,28 @@ def _step(inv: Invocation) -> List[Invocation]:
             return parse_command(split)
     off = _wrapper_offset(name, args)
     if off is not None:
+        inv.wrapper = True
+        if len(argv) == 2 + off and re.search(r"\s", argv[1 + off]):
+            return parse_command(argv[1 + off])  # watch 'a b': one word that is a command line
         return _rest(inv, 1 + off)
+    if name in ("docker", "podman", "docker-compose", "podman-compose"):
+        pre = ["compose"] if name.endswith("-compose") else []
+        off = _container_offset(name, pre + args)
+        if off is not None and off - len(pre) >= 0:
+            inv.wrapper = True
+            return _rest(inv, 1 + off - len(pre))
+        return []
     if name in _SHELLS:
         script = _shell_script(args)
         if script is None:
             inv.opaque = True  # reads its script from stdin or a file
             return []
+        inv.wrapper = True
         return parse_command(script)
     if name == "su":
         for k, a in enumerate(args):
             if a in ("-c", "--command") and k + 1 < len(args):
+                inv.wrapper = True
                 return parse_command(args[k + 1])
         return []
     if name == "eval":
@@ -184,11 +239,14 @@ def _step(inv: Invocation) -> List[Invocation]:
         return _find_execs(inv)
     if name == "xargs":
         off = _xargs_offset(args)
+        inv.wrapper = True
         if 1 + off >= len(argv):
             return [Invocation(["echo"], [False], list(inv.redirects), inv.raw, inv.opaque, True)]
         return [_clone(inv, argv[1 + off :], inv.dynamic[1 + off :], via_xargs=True)]
     if name == "ssh":
         cmd = _ssh_command(args)
+        if cmd:
+            inv.wrapper = True
         return parse_command(" ".join(cmd)) if cmd else []
     if name == "kubectl" and "exec" in args and "--" in args:
         idx = argv.index("--")
