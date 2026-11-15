@@ -3,6 +3,7 @@
 
 Usage: agent-guard parse|check|explain '<command>'
        agent-guard check-path <tool> <path>
+       agent-guard decide   (request JSON on stdin)
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 
+from agent_guard.decision import make_ctx, run_decision  # noqa: E402
 from agent_guard.parse import parse_command  # noqa: E402
 from agent_guard.rules import Ctx, decide_bash, decide_path, explain_bash, load_policy  # noqa: E402
 from agent_guard.unwrap import unwrap  # noqa: E402
@@ -23,9 +25,19 @@ def _policy() -> dict:
 
 
 def _ctx() -> Ctx:
-    cwd = os.getcwd()
-    tmp = os.environ.get("TMPDIR", "/tmp")
-    return Ctx(cwd, os.environ.get("CLAUDE_PROJECT_DIR") or cwd, os.path.expanduser("~"), [tmp, "/tmp"])
+    return make_ctx()
+
+
+def _decide() -> int:
+    home = os.path.expanduser("~")
+    policy = os.environ.get("AGENT_GUARD_POLICY") or os.path.join(home, ".config", "agent-guard", "policy.json")
+    log_path = os.environ.get("AGENT_GUARD_LOG") or os.path.join(home, ".local", "state", "agent-guard", "decisions.jsonl")
+    try:
+        request = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
+    except Exception:
+        request = None
+    print(json.dumps(run_decision(request, policy, log_path)))
+    return 0
 
 
 def main(argv: list) -> int:
@@ -46,7 +58,9 @@ def main(argv: list) -> int:
         d = decide_path(argv[2], argv[3], _policy(), _ctx())
         print("none" if d.decision == "none" else "\t".join([d.decision, d.rule, d.reason]))
         return 0
-    print("usage: agent-guard parse|check|explain '<command>' | check-path <tool> <path>", file=sys.stderr)
+    if len(argv) == 2 and argv[1] == "decide":
+        return _decide()
+    print("usage: agent-guard parse|check|explain '<command>' | check-path <tool> <path> | decide", file=sys.stderr)
     return 2
 
 
