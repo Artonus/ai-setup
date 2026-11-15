@@ -45,7 +45,15 @@ def _claude() -> int:
         text = ""
     _, out = run_claude_hook(text, policy, log_path)
     if out:
-        print(out)
+        try:
+            sys.stdout.write(out + "\n")
+            sys.stdout.flush()
+        except Exception:
+            # Closed pipe: point stdout at devnull so the shutdown flush cannot fail.
+            try:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            except Exception:
+                pass
     return 0
 
 

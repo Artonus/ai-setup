@@ -18,6 +18,9 @@ def _request(data: dict):
     """Build a decision request, or None when the tool is not one we guard."""
     name = data.get("tool_name")
     tool_input = data.get("tool_input")
+    if name == _BASH and not (isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str)
+                              and tool_input["command"].strip()):
+        return "bash call without a command"  # not a request: run_decision treats it as a guard error
     if not isinstance(tool_input, dict):
         tool_input = {}
     cwd = _s(data.get("cwd"))
@@ -53,7 +56,7 @@ def run_claude_hook(stdin_text: str, policy_path: str, log_path: str) -> tuple:
             if request is None:
                 return 0, ""
         else:
-            request = data if data is not None else "not an object"  # guard error path
+            request = "not an object"  # guard error path
         result = run_decision(request, policy_path, log_path)
         if not result.get("enforced") or result.get("decision") not in ("ask", "deny"):
             return 0, ""

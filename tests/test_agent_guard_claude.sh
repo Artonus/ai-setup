@@ -49,8 +49,8 @@ test_ag_claude_none_is_silent() {
   assert_eq 0 "$(ag_rc)" "exit"
   assert_eq "" "$(ag_claude "$(ag_hook_json Read '{"file_path":"/etc/hosts"}')")" "other tool silent"
   assert_eq 0 "$(ag_rc)" "exit other"
-  assert_eq "" "$(ag_claude '{"tool_name":"Bash","tool_input":null}')" "null tool_input silent"
-  assert_eq 0 "$(ag_rc)" "exit null input"
+  assert_eq "" "$(ag_claude "$(ag_hook_json bash '{"command":"kubectl delete ns demo"}')")" "lowercase tool_name silent"
+  assert_eq 0 "$(ag_rc)" "exit lowercase"
   rm -rf "$AG_D"
 }
 
@@ -60,6 +60,7 @@ test_ag_claude_shadow_is_silent() {
   assert_eq 0 "$(ag_rc)" "exit"
   assert_eq ask "$(jq -r .decision "$AG_LOG")" "logged decision"
   assert_eq claude "$(jq -r .source "$AG_LOG")" "logged source"
+  assert_eq s1 "$(jq -r .session_id "$AG_LOG")" "logged session_id"
   rm -rf "$AG_D"
 }
 
@@ -71,10 +72,15 @@ test_ag_claude_edit_path() {
   assert_contains "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" "Path: ~/.zshrc" "path"
   out="$(ag_claude "$(ag_hook_json Edit '{"file_path":"~/.zshrc"}')")"
   assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" "edit"
+  assert_contains "$out" "Path: ~/.zshrc" "edit path"
   out="$(ag_claude "$(ag_hook_json MultiEdit '{"file_path":"~/.zshrc"}')")"
   assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" "multiedit"
+  assert_contains "$out" "Path: ~/.zshrc" "multiedit path"
   out="$(ag_claude "$(ag_hook_json NotebookEdit '{"notebook_path":"~/.zshrc"}')")"
   assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" "notebook"
+  assert_contains "$out" "Path: ~/.zshrc" "notebook path"
+  out="$(ag_claude "$(ag_hook_json MultiEdit '{}')")"
+  assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" "multiedit without path asks"
   rm -rf "$AG_D"
 }
 
@@ -98,12 +104,46 @@ test_ag_claude_bad_input() {
   done
   out="$(printf '\377\376\200' | AGENT_GUARD_POLICY="$AG_D/policy.json" AGENT_GUARD_LOG="$AG_LOG" HOME="$AG_D/home" python3 "$ROOT/tools/bin/agent-guard" claude; echo "rc=$?")"
   assert_contains "$out" "rc=0" "exit non-utf8"
-  assert_contains "$out" "\"permissionDecision\": \"ask\"" "non-utf8 asks"
+  assert_eq ask "$(sed '$d' <<<"$out" | jq -r .hookSpecificOutput.permissionDecision)" "non-utf8 asks"
   rm -rf "$AG_D"
   ag_cl_setup shadow
   for inp in "" "not json"; do
     assert_eq "" "$(ag_claude "$inp")" "shadow silent"
     assert_eq 0 "$(ag_rc)" "exit shadow"
   done
+  rm -rf "$AG_D"
+}
+
+test_ag_claude_bad_bash_input() {
+  local m in
+  for m in enforce shadow; do
+    ag_cl_setup "$m"
+    for in in '{"tool_name":"Bash","tool_input":null}' '{"tool_name":"Bash","tool_input":{}}' \
+      '{"tool_name":"Bash","tool_input":{"command":""}}' '{"tool_name":"Bash","tool_input":{"command":5}}'; do
+      local out; out="$(ag_claude "$in")"
+      assert_eq 0 "$(ag_rc)" "exit $m"
+      if [ "$m" = enforce ]; then
+        assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" "enforce asks"
+      else
+        assert_eq "" "$out" "shadow silent"
+      fi
+    done
+    rm -rf "$AG_D"
+  done
+}
+
+test_ag_claude_closed_pipe_exits_zero() {
+  ag_cl_setup enforce
+  ag_hook_json Bash '{"command":"kubectl delete ns demo"}' >"$AG_D/req.json"
+  local rc
+  AGENT_GUARD_POLICY="$AG_D/policy.json" AGENT_GUARD_LOG="$AG_LOG" HOME="$AG_D/home" \
+    python3 -c '
+import subprocess, sys, time
+p = subprocess.Popen([sys.argv[1], "claude"], stdin=open(sys.argv[2]), stdout=subprocess.PIPE)
+p.stdout.close()
+sys.exit(p.wait())
+' "$ROOT/tools/bin/agent-guard" "$AG_D/req.json"
+  rc=$?
+  assert_eq 0 "$rc" "exit with closed stdout pipe"
   rm -rf "$AG_D"
 }
