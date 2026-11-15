@@ -16,6 +16,9 @@ this repo.
 | `claude/` | `CLAUDE.md` (imports `AGENTS.md`) and `settings.json` |
 | `vendor/mattpocock-skills/` | Git submodule of [mattpocock/skills](https://github.com/mattpocock/skills); the `engineering/` and `productivity/` skills are linked into `~/.claude/skills` (same precedence as above; those superpowers already covers are skipped, see `MATT_SKIP` in `install.sh`) |
 | `opencode/` | `opencode.json`, plus optional OpenCode-only `skills/`, `agents/`, `commands/` (linked only into `~/.config/opencode`; a same-named shared agent or command is replaced there) |
+| `shared/agent-guard/` | `policy.json` for the agent guard (see below), installed to `~/.config/agent-guard/policy.json` (an overlay's copy is deep-merged on top) |
+| `opencode/plugins/` | OpenCode-only plugins; `plugins/agent-guard` is the OpenCode side of the guard, linked into `~/.config/opencode/plugins` |
+| `tools/bin/agent-guard` | The guard itself (decision engine plus the Claude Code hook adapter `agent-guard claude`), linked into `~/bin` |
 | `kilo/` | `kilo.json` for Kilo (an OpenCode V1 fork, V1 keys: `mcp.<name>` with `enabled`, `permission`, `plugin`), linked into `~/.config/kilo` next to `AGENTS.md` |
 | `tools/bin/`, `tools/lib/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `memory-search-mcp` and the meeting tools (Ubuntu: PulseAudio, ffmpeg, Whisper). `meeting-rec start\|stop\|status` records a meeting into `~/recordings` (stereo: left = remote, right = your mic, plus a `meeting-*.json` sidecar). `meeting-daemon` serves a Tampermonkey userscript for Google Meet that starts and stops it. `meeting-transcribe` turns recordings into transcripts in `~/notes` (`Me:` / `Remote:` / `Remote N:` via `tools/lib/merge-tracks.py`; optional diarization and notes agent). `meeting-notes-run`, `meeting-notify`, `meeting-cleanup`, `meeting-wer` and `meeting-wer-prep` do the rest, see `docs/asr-eval.md` for choosing a model. Tests: `bash tests/run.sh`; the overlay can add its own tools |
 | `overlay.example/` | Template for a private work overlay |
@@ -102,6 +105,24 @@ on `PATH`) that reads the notes through the `trilium` MCP endpoint with `TRILIUM
 `google/embeddinggemma-300m`. The first run downloads its Python packages and the model (~1.2 GB)
 into `~/.cache`; vectors are cached in `~/.cache/memory-search`, so only new or changed memories
 are embedded again. Try it with `memory-search-mcp --query "some words"`.
+
+## Agent guard
+
+`agent-guard` gates risky agent actions before they run, in OpenCode (the `plugins/agent-guard` plugin) and in
+Claude Code (a `PreToolUse` hook in `claude/settings.json` that calls `agent-guard claude`, blocking on failure).
+It asks for confirmation on database clients, cluster and cloud mutations, force-push and deletes, and on reads
+or writes of secret and protected paths. The rules live in `shared/agent-guard/policy.json`.
+
+- **Modes.** `mode` is `shadow` (the shipped default: every decision is only logged, nothing is blocked) or
+  `enforce` (the guard asks or blocks). Run in shadow for a while, review the log, then switch the mode in your overlay.
+- **Log.** Each decision is one JSON line in `~/.local/state/agent-guard/decisions.jsonl`. Review it with
+  `jq -r 'select(.decision!="none") | [.decision,.rule,.command] | @tsv' ~/.local/state/agent-guard/decisions.jsonl | sort | uniq -c | sort -rn`.
+- **Try a command.** `agent-guard check '<cmd>'` prints the decision for a command without running it.
+- **Extra policy keys.** `failClosedTools` lists tools whose commands cannot be parsed safely and are therefore
+  always gated; `cloudRules` holds the cloud CLI rules.
+- **Known gaps.** The guard reads the command, not what it runs: project scripts and binaries the agent writes
+  itself are not inspected; wrappers it does not unwrap (such as `docker exec`) hide what they run; and a bare
+  dynamic command name with no sensitive word in it passes.
 
 ## Adding things
 

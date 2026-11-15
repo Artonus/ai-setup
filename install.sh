@@ -274,7 +274,7 @@ preflight_overlay() {
   [ -d "$AI_SETUP_OVERLAY" ] || die "AI_SETUP_OVERLAY is not a directory: $AI_SETUP_OVERLAY"
   AI_SETUP_OVERLAY="$(cd "$AI_SETUP_OVERLAY" && pwd -P)"
   local f
-  for f in claude/settings.json claude/mcp.json opencode/opencode.json kilo/kilo.json; do
+  for f in claude/settings.json claude/mcp.json opencode/opencode.json kilo/kilo.json shared/agent-guard/policy.json; do
     [ -f "$AI_SETUP_OVERLAY/$f" ] || continue
     [ -f "$REPO/$f" ] || continue
     command -v jq >/dev/null 2>&1 || die "jq is required to merge $f from the overlay"
@@ -307,9 +307,11 @@ install_all() {
   done
   # OpenCode-only entries (OpenCode frontmatter, or tools only OpenCode has). They win over a
   # same-named shared entry in ~/.config/opencode.
-  for kind in skills agents commands; do
+  for kind in skills agents commands plugins; do
     link_children opencode "$kind" "$OPENCODE_DIR/$kind"
   done
+  # Agent guard policy, read by ~/bin/agent-guard (an overlay policy is deep-merged on top).
+  install_json shared agent-guard/policy.json "${XDG_CONFIG_HOME:-$HOME/.config}/agent-guard/policy.json"
   # Helper scripts (e.g. the meeting recorder), linked into ~/bin, which must be on PATH.
   link_children tools bin "$HOME/bin"
 }
