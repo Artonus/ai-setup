@@ -16,9 +16,10 @@ def make_ctx(cwd: str = "", project_dir: str = "") -> Ctx:
     return Ctx(cwd, project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or cwd, os.path.expanduser("~"), [tmp, "/tmp"])
 
 
-def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
+def run_decision(request: dict, policy_path: str, log_path: str, policy_note: str = "") -> dict:
     mode = "shadow"
     decision, rule, reason = "ask", "guard-error", "agent-guard failed; asking to be safe"
+    error = ""
     req = request if isinstance(request, dict) else {}
     try:
         try:
@@ -43,8 +44,8 @@ def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
             command = str(req.get("command") or "")
             if command not in reason:
                 reason = "%s: %s" % (reason, command[:200])
-    except Exception:
-        pass
+    except Exception as exc:
+        error = ("%s: %s" % (type(exc).__name__, exc))[:200]
     try:
         tool = str(req.get("tool") or "").lower()
         subject = req.get("command") if tool == "bash" else req.get("path")
@@ -52,7 +53,7 @@ def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
             v = req.get(key, "")
             return v if v is None or isinstance(v, str) else str(v)
 
-        log.append(log_path, {
+        entry = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "source": text("source"),
             "session_id": text("session_id"),
@@ -64,7 +65,12 @@ def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
             "rule": rule,
             "mode": mode,
             "command": log.mask(str(subject or "")),
-        })
+        }
+        if rule == "guard-error":
+            entry["error"] = log.mask(error)
+        if policy_note:
+            entry["policy"] = policy_note
+        log.append(log_path, entry)
     except Exception:
         pass
     return {"decision": decision, "rule": rule, "reason": reason, "mode": mode, "enforced": mode == "enforce"}

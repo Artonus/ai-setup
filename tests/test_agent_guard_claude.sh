@@ -31,7 +31,8 @@ test_ag_claude_enforce_asks() {
   assert_eq PreToolUse "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" "event"
   local reason; reason="$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")"
   assert_contains "$reason" "agent-guard: " "prefix"
-  assert_contains "$reason" "Command: kubectl delete ns demo" "command"
+  assert_contains "$reason" "kubectl delete ns demo" "command"
+  assert_eq 1 "$(grep -o 'kubectl delete ns demo' <<<"$reason" | wc -l | tr -d ' ')" "command appears once"
   rm -rf "$AG_D"
 }
 
@@ -145,5 +146,16 @@ sys.exit(p.wait())
 ' "$ROOT/tools/bin/agent-guard" "$AG_D/req.json"
   rc=$?
   assert_eq 0 "$rc" "exit with closed stdout pipe"
+  rm -rf "$AG_D"
+}
+
+test_ag_claude_guard_error_reason_has_no_empty_command() {
+  ag_cl_setup enforce
+  mkdir -p "$(dirname "$AG_LOG")"
+  printf '%s\n' '{"mode": "enforce"}' >"$AG_LOG"
+  local out reason
+  out="$(AG_POLICY="$AG_D/missing.json" ag_claude 'not json')"
+  reason="$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")"
+  case $reason in *"Command: "*) fail "empty Command suffix: $reason" ;; *) ok ;; esac
   rm -rf "$AG_D"
 }

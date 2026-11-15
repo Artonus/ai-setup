@@ -44,7 +44,7 @@ def _request(data: dict):
     return req
 
 
-def run_claude_hook(stdin_text: str, policy_path: str, log_path: str) -> tuple:
+def run_claude_hook(stdin_text: str, policy_path: str, log_path: str, policy_note: str = "") -> tuple:
     """Return (exit_code, stdout). Exit code is always 0; never prints allow."""
     try:
         try:
@@ -57,15 +57,19 @@ def run_claude_hook(stdin_text: str, policy_path: str, log_path: str) -> tuple:
                 return 0, ""
         else:
             request = "not an object"  # guard error path
-        result = run_decision(request, policy_path, log_path)
+        result = run_decision(request, policy_path, log_path, policy_note)
         if not result.get("enforced") or result.get("decision") not in ("ask", "deny"):
             return 0, ""
         subject = "Path" if isinstance(request, dict) and request.get("tool") != "bash" else "Command"
         value = request.get("path" if subject == "Path" else "command", "") if isinstance(request, dict) else ""
+        reason = str(result.get("reason", ""))
+        text = "agent-guard: %s" % reason
+        if value and value[:200] not in reason:  # the reason names the command once
+            text += ". %s: %s" % (subject, value)
         out = {"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": result["decision"],
-            "permissionDecisionReason": "agent-guard: %s. %s: %s" % (result.get("reason", ""), subject, value),
+            "permissionDecisionReason": text,
         }}
         return 0, json.dumps(out)
     except Exception:

@@ -6,16 +6,24 @@ import os
 import re
 
 _HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n.*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|\Z)", re.DOTALL)
-_VAL = r"(?:\"[^\"]*\"|'[^']*'|[^\s&'\"]+)"
+_VAL = r"(?:\"[^\"]*\"|'[^']*'|[^\s&;|'\"]+)"
 _BEARER = re.compile(r"(?i)\b(bearer)\s+" + _VAL)
 _LONGOPT = re.compile(r"(?i)(--(?:password|passwd|token|secret|api-?key))[ =]" + _VAL)
 _SECRET = re.compile(r"(?i)\b(\w*(?:password|passwd|token|secret|api[_-]?key|key))[ \t]*([:=])[ \t]*" + _VAL)
-_USERPASS = re.compile(r"(?i)((?:^|\s)(?:-u|--user)[ =]['\"]?[^\s:'\"]+):[^\s'\"]+")
+_USERPASS = re.compile(r"(?i)((?:^|\s)(?:-u|--user)[ =]?['\"]?[^\s:'\"]+):[^\s'\"]+")
+_URLPASS = re.compile(r"(\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@'\"]+):[^\s@/'\"]+@")
+_BASIC = re.compile(r"(?i)\b(basic)\s+[A-Za-z0-9+/=_-]{6,}")
+_DBPASS = re.compile(r"(?i)\b((?:mysql|mysqldump|mysqladmin|mariadb)\b[^|;&\n]*?\s)-p\S+")
+_JSONKEY = re.compile(r"(?i)([\"'])(\w*(?:password|passwd|token|secret|api[_-]?key|key))\1(\s*:\s*)" + _VAL)
 _CAP = 300
 
 
 def mask(text: str) -> str:
     text = _HEREDOC.sub(lambda m: "<<heredoc>>" + m.group(3), text)
+    text = _JSONKEY.sub(lambda m: m.group(1) + m.group(2) + m.group(1) + m.group(3) + m.group(1) + "***" + m.group(1), text)
+    text = _URLPASS.sub(lambda m: m.group(1) + ":***@", text)
+    text = _BASIC.sub(lambda m: m.group(1) + " ***", text)
+    text = _DBPASS.sub(lambda m: m.group(1) + "-p***", text)
     text = _BEARER.sub(lambda m: m.group(1) + " ***", text)
     text = _LONGOPT.sub(lambda m: m.group(1) + " ***", text)
     text = _SECRET.sub(lambda m: m.group(1) + m.group(2) + "***", text)

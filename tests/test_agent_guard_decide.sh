@@ -176,3 +176,50 @@ test_ag_decide_unwritable_log() {
   assert_eq none "$(jq -r .decision <<<"$out")" "decision still returned"
   rm -rf "$AG_D"
 }
+
+test_ag_decide_masks_url_basic_db_json() {
+  ag_dec_setup shadow
+  local c line
+  for c in 'curl -H "Authorization: Basic dXNlcjpwYXNz" x' 'mysql -ps3cr3tval db' 'psql postgres://u:s3cr3tval@h/db' \
+           'echo {"password": "s3cr3tval"}' "echo '{\"token\":\"s3cr3tval\"}'" 'curl -us3cr3tuser:s3cr3tval x' \
+           'AWS_SECRET_ACCESS_KEY=s3cr3tval; ls'; do
+    ag_decide "$(ag_req "$c")" >/dev/null
+    line="$(tail -n1 "$AG_LOG")"
+    case $line in *s3cr3tval*|*dXNlcjpwYXNz*) fail "leaked: $c ($line)" ;; *) ok ;; esac
+    assert_contains "$line" '***' "masked: $c"
+  done
+  ag_decide "$(ag_req 'AWS_SECRET_ACCESS_KEY=abc; gh pr list')" >/dev/null
+  assert_contains "$(tail -n1 "$AG_LOG")" 'gh pr list' "masking stops at a semicolon"
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_guard_error_logs_cause() {
+  ag_dec_setup shadow
+  AG_POLICY="$AG_D/missing.json" ag_decide "$(ag_req 'ls')" >/dev/null
+  local line; line="$(tail -n1 "$AG_LOG")"
+  assert_eq guard-error "$(jq -r .rule <<<"$line")" "rule"
+  assert_contains "$(jq -r .error <<<"$line")" "FileNotFoundError" "error class logged"
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_repo_policy_fallback_and_xdg() {
+  ag_dec_setup shadow
+  local out line
+  # no AGENT_GUARD_POLICY and no installed policy: the repo copy is used and the log says so
+  out="$(printf '%s' "$(ag_req 'ls')" | env -u AGENT_GUARD_POLICY AGENT_GUARD_LOG="$AG_LOG" HOME="$AG_D/home" XDG_CONFIG_HOME="$AG_D/xdg" \
+    python3 "$ROOT/tools/bin/agent-guard" decide)"
+  assert_eq none "$(jq -r .decision <<<"$out")" "decision from the repo policy"
+  assert_eq repo-fallback "$(jq -r .policy "$AG_LOG")" "log notes the fallback"
+  # an installed policy under XDG_CONFIG_HOME wins and gets no note
+  mkdir -p "$AG_D/xdg/agent-guard"
+  jq '.mode = "enforce"' "$ROOT/shared/agent-guard/policy.json" >"$AG_D/xdg/agent-guard/policy.json"
+  out="$(printf '%s' "$(ag_req 'psql')" | env -u AGENT_GUARD_POLICY AGENT_GUARD_LOG="$AG_LOG" HOME="$AG_D/home" XDG_CONFIG_HOME="$AG_D/xdg" \
+    python3 "$ROOT/tools/bin/agent-guard" decide)"
+  assert_eq true "$(jq -r .enforced <<<"$out")" "XDG policy used"
+  line="$(tail -n1 "$AG_LOG")"
+  assert_eq null "$(jq -r '.policy // "null"' <<<"$line")" "no note for the installed policy"
+  # an explicit but missing policy is still a guard error (no fallback)
+  out="$(AG_POLICY="$AG_D/missing.json" ag_decide "$(ag_req 'ls')")"
+  assert_eq guard-error "$(jq -r .rule <<<"$out")" "explicit missing policy"
+  rm -rf "$AG_D"
+}

@@ -21,9 +21,24 @@ from agent_guard.rules import Ctx, decide_bash, decide_path, explain_bash, load_
 from agent_guard.unwrap import unwrap  # noqa: E402
 
 
+def _policy_path() -> tuple:
+    """(policy path, note). The installed policy, else the repo copy next to this script."""
+    explicit = os.environ.get("AGENT_GUARD_POLICY")
+    if explicit:
+        return explicit, ""
+    config = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    installed = os.path.join(config, "agent-guard", "policy.json")
+    if os.path.exists(installed):
+        return installed, ""
+    here = os.path.dirname(os.path.realpath(__file__))
+    repo = os.path.normpath(os.path.join(here, "..", "..", "shared", "agent-guard", "policy.json"))
+    if os.path.exists(repo):
+        return repo, "repo-fallback"
+    return installed, ""
+
+
 def _policy() -> dict:
-    default = os.path.join(os.path.expanduser("~"), ".config", "agent-guard", "policy.json")
-    return load_policy(os.environ.get("AGENT_GUARD_POLICY") or default)
+    return load_policy(_policy_path()[0])
 
 
 def _ctx() -> Ctx:
@@ -32,18 +47,18 @@ def _ctx() -> Ctx:
 
 def _paths() -> tuple:
     home = os.path.expanduser("~")
-    policy = os.environ.get("AGENT_GUARD_POLICY") or os.path.join(home, ".config", "agent-guard", "policy.json")
+    policy, note = _policy_path()
     log_path = os.environ.get("AGENT_GUARD_LOG") or os.path.join(home, ".local", "state", "agent-guard", "decisions.jsonl")
-    return policy, log_path
+    return policy, log_path, note
 
 
 def _claude() -> int:
-    policy, log_path = _paths()
+    policy, log_path, note = _paths()
     try:
         text = sys.stdin.buffer.read().decode("utf-8", "replace")
     except Exception:
         text = ""
-    _, out = run_claude_hook(text, policy, log_path)
+    _, out = run_claude_hook(text, policy, log_path, note)
     if out:
         try:
             sys.stdout.write(out + "\n")
@@ -58,12 +73,12 @@ def _claude() -> int:
 
 
 def _decide() -> int:
-    policy, log_path = _paths()
+    policy, log_path, note = _paths()
     try:
         request = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
         request = None
-    print(json.dumps(run_decision(request, policy, log_path)))
+    print(json.dumps(run_decision(request, policy, log_path, note)))
     return 0
 
 
