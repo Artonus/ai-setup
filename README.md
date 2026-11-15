@@ -20,7 +20,7 @@ this repo.
 | `opencode/plugins/` | OpenCode-only plugins; `plugins/agent-guard` is the OpenCode side of the guard, linked into `~/.config/opencode/plugins` |
 | `tools/bin/agent-guard` | The guard itself (decision engine plus the Claude Code hook adapter `agent-guard claude`), linked into `~/bin` |
 | `kilo/` | `kilo.json` for Kilo (an OpenCode V1 fork, V1 keys: `mcp.<name>` with `enabled`, `permission`, `plugin`), linked into `~/.config/kilo` next to `AGENTS.md` |
-| `tools/bin/`, `tools/lib/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `memory-search-mcp` and the meeting tools (Ubuntu: PulseAudio, ffmpeg, Whisper). `meeting-rec start\|stop\|status` records a meeting into `~/recordings` (stereo: left = remote, right = your mic, plus a `meeting-*.json` sidecar). `meeting-daemon` serves a Tampermonkey userscript for Google Meet that starts and stops it. `meeting-transcribe` turns recordings into transcripts in `~/notes` (`Me:` / `Remote:` / `Remote N:` via `tools/lib/merge-tracks.py`; optional diarization and notes agent). `meeting-notes-run`, `meeting-notify`, `meeting-cleanup`, `meeting-wer` and `meeting-wer-prep` do the rest, see `docs/asr-eval.md` for choosing a model. Tests: `bash tests/run.sh`; the overlay can add its own tools |
+| `tools/bin/`, `tools/lib/` | Helper scripts, linked into `~/bin` (put it on `PATH`): `agent-memory-smoke` and the meeting tools (Ubuntu: PulseAudio, ffmpeg, Whisper). `meeting-rec start\|stop\|status` records a meeting into `~/recordings` (stereo: left = remote, right = your mic, plus a `meeting-*.json` sidecar). `meeting-daemon` serves a Tampermonkey userscript for Google Meet that starts and stops it. `meeting-transcribe` turns recordings into transcripts in `~/notes` (`Me:` / `Remote:` / `Remote N:` via `tools/lib/merge-tracks.py`; optional diarization and notes agent). `meeting-notes-run`, `meeting-notify`, `meeting-cleanup`, `meeting-wer` and `meeting-wer-prep` do the rest, see `docs/asr-eval.md` for choosing a model. Tests: `bash tests/run.sh`; the overlay can add its own tools |
 | `overlay.example/` | Template for a private work overlay |
 
 ## Install
@@ -72,7 +72,7 @@ export AI_SETUP_OVERLAY=~/work/ai-setup-private   # e.g. in your work machine's 
 
 `opencode/opencode.json` declares `context7` (key from `CONTEXT7_API_KEY`), `todoist` and `linear` (both OAuth in
 the browser on first use; Linear is the tracker for personal work, Jira exists only in the work overlay), `trilium` (URL from `TRILIUM_MCP_URL`, token from `TRILIUM_MCP_TOKEN`), `firecrawl` (local via `npx -y firecrawl-mcp`, key from `FIRECRAWL_API_KEY`), `playwright` (local, run with
-the globally installed `playwright-mcp`; uses the installed Google Chrome), `memory-search` (local, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
+the globally installed `playwright-mcp`; uses the installed Google Chrome), `agent-memory` (remote, see below) and `google-calendar`. Google Calendar ships **disabled**: it needs a
 Google Cloud project with the Calendar API and Calendar MCP API enabled and a web OAuth client.
 Export `GOOGLE_MCP_CLIENT_ID` and `GOOGLE_MCP_CLIENT_SECRET`, set
 `mcp.servers.google-calendar.disabled` to `false` in your overlay's `opencode/opencode.json`,
@@ -98,13 +98,13 @@ removed on the next run, and `--uninstall` takes ours back out. `trilium` reads 
 `${TRILIUM_MCP_TOKEN}`, expanded by Claude Code at startup. `playwright` is a stdio server
 started with `npx`, so Node.js must be on `PATH`. Kilo gets the same servers in `kilo/kilo.json`.
 
-`memory-search` (`tools/bin/memory-search-mcp`, linked into `~/bin`) adds similarity search over
-the `#memory` notes: one tool, `memory_search(query)`. It is a `uv` script (needs `uv` and `~/bin`
-on `PATH`) that reads the notes through the `trilium` MCP endpoint with `TRILIUM_MCP_TOKEN`
-(ETAPI is behind the SSO proxy) and embeds each title and preview locally with fastembed and
-`google/embeddinggemma-300m`. The first run downloads its Python packages and the model (~1.2 GB)
-into `~/.cache`; vectors are cached in `~/.cache/memory-search`, so only new or changed memories
-are embedded again. Try it with `memory-search-mcp --query "some words"`.
+`agent-memory` is the agents' memory: a self-hosted Graphiti knowledge graph on FalkorDB, running on the
+homelab server behind Traefik (internal chain: LAN and Tailscale only; the server has no authentication of its
+own). Export `AGENT_MEMORY_URL` (the `/mcp` endpoint, no trailing slash). Facts are namespaced by `group_id`
+(`personal`, `work`), and a new fact that contradicts an old one invalidates it while keeping its history.
+The stack lives in the homelab repo (`agent-memory/`), not here. `tools/bin/agent-memory-smoke` checks a
+running server: write and find, contradiction, group isolation and duplicate episodes
+(`AGENT_MEMORY_URL=... agent-memory-smoke`; Python 3.9+, standard library only).
 
 ## Agent guard
 

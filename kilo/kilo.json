@@ -27,11 +27,9 @@
         "Authorization": "Bearer {env:TRILIUM_MCP_TOKEN}"
       }
     },
-    "memory-search": {
-      "type": "local",
-      "command": [
-        "memory-search-mcp"
-      ],
+    "agent-memory": {
+      "type": "remote",
+      "url": "{env:AGENT_MEMORY_URL}",
       "enabled": true
     },
     "playwright": {

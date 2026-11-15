@@ -213,11 +213,31 @@ test_layout_matt_workflow_skills_are_not_switched_off() {
   done
 }
 
-test_layout_memory_search_mcp_is_wired_everywhere() {
-  if [ -x "$ROOT/tools/bin/memory-search-mcp" ]; then ok; else fail "tools/bin/memory-search-mcp missing or not executable"; fi
-  if jq -e '.mcpServers["memory-search"].command == "memory-search-mcp"' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "claude/mcp.json lacks memory-search"; fi
-  if jq -e '.mcp.servers["memory-search"] | .command == ["memory-search-mcp"] and .disabled == false' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json lacks memory-search"; fi
-  if jq -e '.mcp["memory-search"] | .command == ["memory-search-mcp"] and .enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json lacks memory-search"; fi
+test_layout_agent_memory_mcp_is_wired_everywhere() {
+  if jq -e '.mcpServers["agent-memory"] | .type == "http" and .url == "${AGENT_MEMORY_URL}"' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "claude/mcp.json lacks agent-memory"; fi
+  if jq -e '.mcp.servers["agent-memory"] | .type == "remote" and .url == "{env:AGENT_MEMORY_URL}" and .disabled == false' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json lacks agent-memory"; fi
+  if jq -e '.mcp["agent-memory"] | .type == "remote" and .url == "{env:AGENT_MEMORY_URL}" and .enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json lacks agent-memory"; fi
+}
+
+test_layout_memory_search_is_gone() {
+  if jq -e 'has("memory-search") | not' <(jq '.mcpServers' "$ROOT/claude/mcp.json") >/dev/null; then ok; else fail "claude/mcp.json still has memory-search"; fi
+  if jq -e '.mcp.servers | has("memory-search") | not' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json still has memory-search"; fi
+  if jq -e '.mcp | has("memory-search") | not' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json still has memory-search"; fi
+  if [ ! -e "$ROOT/tools/bin/memory-search-mcp" ]; then ok; else fail "tools/bin/memory-search-mcp still exists"; fi
+}
+
+test_layout_no_literal_memory_host_in_configs() {
+  if ! grep -l 'artonus.net' "$ROOT/claude/mcp.json" "$ROOT/opencode/opencode.json" "$ROOT/kilo/kilo.json" >/dev/null 2>&1; then ok; else fail "a config contains the literal homelab hostname"; fi
+}
+
+test_layout_agents_md_memory_section_uses_agent_memory() {
+  local f="$ROOT/shared/AGENTS.md"
+  if grep -q 'agent-memory' "$f" && grep -q 'search_memory_facts' "$f" && grep -q 'add_memory' "$f"; then ok; else fail "AGENTS.md memory section does not describe agent-memory"; fi
+  if ! grep -qE 'memory_search|#core|memory-search' "$f"; then ok; else fail "AGENTS.md still mentions the old Trilium memory tools"; fi
+}
+
+test_layout_agent_memory_smoke_script_is_executable() {
+  if [ -x "$ROOT/tools/bin/agent-memory-smoke" ]; then ok; else fail "tools/bin/agent-memory-smoke missing or not executable"; fi
 }
 
 test_layout_meeting_notes_agent_has_shared_frontmatter() {

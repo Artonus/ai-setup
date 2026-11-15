@@ -11,9 +11,9 @@
       "type": "http",
       "url": "https://mcp.linear.app/mcp"
     },
-    "memory-search": {
-      "type": "stdio",
-      "command": "memory-search-mcp"
+    "agent-memory": {
+      "type": "http",
+      "url": "${AGENT_MEMORY_URL}"
     },
     "playwright": {
       "type": "stdio",

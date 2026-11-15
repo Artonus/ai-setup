@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Smoke test for the agent-memory (Graphiti) MCP server.
+
+Talks MCP over streamable HTTP with the standard library only (macOS system Python 3.9 is enough).
+Writes only to the groups smoke-a and smoke-b and clears both before and after.
+
+    AGENT_MEMORY_URL=https://host/mcp/ agent-memory-smoke [--url URL] [--list-tools]
+
+Exit code 0 when every check passes.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.request
+
+GROUP_A = "smoke-a"
+GROUP_B = "smoke-b"
+OWNER_ALPHA = "The billing-service retry job is owned by team Alpha."
+OWNER_BETA = "As of today the billing-service retry job is owned by team Beta."
+QUESTION = "who owns the billing-service retry job"
+PROCESS_TIMEOUT = 120
+
+
+class Mcp:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.session = None
+        self._id = 0
+        self._rpc("initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "agent-memory-smoke", "version": "1"},
+        })
+        self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def _post(self, body: dict) -> str:
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        if self.session:
+            headers["Mcp-Session-Id"] = self.session
+        req = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            self.session = resp.headers.get("Mcp-Session-Id") or self.session
+            return resp.read().decode()
+
+    @staticmethod
+    def _parse(raw: str) -> dict:
+        raw = raw.strip()
+        if not raw:
+            return {}
+        if raw.startswith("{"):
+            return json.loads(raw)
+        for line in raw.splitlines():
+            if line.startswith("data:"):
+                return json.loads(line[5:].strip())
+        return {}
+
+    def _rpc(self, method: str, params: dict) -> dict:
+        self._id += 1
+        reply = self._parse(self._post({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}))
+        if "error" in reply:
+            raise RuntimeError(f"{method}: {reply['error']}")
+        return reply.get("result", {})
+
+    def list_tools(self) -> list:
+        return self._rpc("tools/list", {}).get("tools", [])
+
+    def call(self, name: str, args: dict):
+        result = self._rpc("tools/call", {"name": name, "arguments": args})
+        if "structuredContent" in result:
+            return result["structuredContent"]
+        text = "".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text
+
+
+def facts(mcp: Mcp, group: str, query: str) -> list:
+    out = mcp.call("search_memory_facts", {"query": query, "group_ids": [group], "max_facts": 20})
+    if isinstance(out, dict) and "result" in out:
+        out = out["result"]
+    if isinstance(out, dict):
+        out = out.get("facts", [])
+    return out if isinstance(out, list) else []
+
+
+def fact_text(f: dict) -> str:
+    return str(f.get("fact", f))
+
+
+def is_valid_now(f: dict) -> bool:
+    return not (f.get("invalid_at") or f.get("expired_at"))
+
+
+def wait_for(predicate, what: str):
+    deadline = time.time() + PROCESS_TIMEOUT
+    while time.time() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(3)
+    raise TimeoutError(f"timed out waiting for {what}")
+
+
+def dump(mcp: Mcp, group: str) -> None:
+    """Print what the graph holds for a group, to see why a check failed."""
+    def unwrap(out, key):
+        if isinstance(out, dict) and "result" in out:
+            out = out["result"]
+        return out.get(key, []) if isinstance(out, dict) else []
+
+    print(f"--- dump of group {group}")
+    for f in unwrap(mcp.call("search_memory_facts", {"query": "billing-service retry job owner", "group_ids": [group], "max_facts": 50}), "facts"):
+        print(f"fact {f.get('name')}: {f.get('fact')!r} valid_at={f.get('valid_at')} invalid_at={f.get('invalid_at')} "
+              f"expired_at={f.get('expired_at')} src={str(f.get('source_node_uuid'))[:8]} dst={str(f.get('target_node_uuid'))[:8]}")
+    for n in unwrap(mcp.call("search_nodes", {"query": "billing-service retry job team", "group_ids": [group], "max_nodes": 50}), "nodes"):
+        print(f"node {str(n.get('uuid'))[:8]} {n.get('name')!r} labels={n.get('labels')}")
+    for e in unwrap(mcp.call("get_episodes", {"group_ids": [group], "max_episodes": 20}), "episodes"):
+        print(f"episode {e.get('name')!r}: {e.get('content')!r}")
+    print("--- end dump")
+
+
+def add(mcp: Mcp, group: str, name: str, body: str) -> None:
+    mcp.call("add_memory", {"name": name, "episode_body": body, "group_id": group, "source": "text"})
+
+
+def clear(mcp: Mcp) -> None:
+    for g in (GROUP_A, GROUP_B):
+        mcp.call("clear_graph", {"group_ids": [g]})
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--url", default=os.environ.get("AGENT_MEMORY_URL"))
+    p.add_argument("--list-tools", action="store_true")
+    args = p.parse_args()
+    if not args.url:
+        print("set AGENT_MEMORY_URL or pass --url", file=sys.stderr)
+        return 2
+    mcp = Mcp(args.url)
+    if args.list_tools:
+        for t in mcp.list_tools():
+            props = t.get("inputSchema", {}).get("properties", {})
+            print(t["name"], sorted(props), "required=", t.get("inputSchema", {}).get("required"))
+        return 0
+
+    results = []
+
+    def check(name, fn):
+        try:
+            fn()
+            print(f"PASS {name}")
+            results.append(True)
+        except Exception as e:  # noqa: BLE001 - report every failure and continue
+            print(f"FAIL {name}: {e}")
+            results.append(False)
+
+    clear(mcp)
+    t0 = time.time()
+
+    def write_then_find():
+        add(mcp, GROUP_A, "owner-alpha", OWNER_ALPHA)
+        hit = wait_for(lambda: [f for f in facts(mcp, GROUP_A, QUESTION) if "alpha" in fact_text(f).lower()], "Alpha fact")
+        assert hit
+
+    def contradiction_invalidates():
+        add(mcp, GROUP_A, "owner-beta", OWNER_BETA)
+
+        def settled():
+            fs = facts(mcp, GROUP_A, QUESTION)
+            beta = [f for f in fs if "beta" in fact_text(f).lower() and is_valid_now(f)]
+            alpha_valid = [f for f in fs if "alpha" in fact_text(f).lower() and is_valid_now(f)]
+            return beta and not alpha_valid
+
+        try:
+            wait_for(settled, "Alpha invalidated and Beta valid")
+        except TimeoutError:
+            dump(mcp, GROUP_A)
+            raise
+        assert any("alpha" in fact_text(f).lower() for f in facts(mcp, GROUP_A, QUESTION)), "history lost: Alpha fact gone"
+
+    def group_isolation():
+        assert not facts(mcp, GROUP_B, QUESTION), "smoke-b can see smoke-a facts"
+
+    def duplicate_is_idempotent():
+        def beta_count():
+            return len([f for f in facts(mcp, GROUP_A, QUESTION) if "beta" in fact_text(f).lower() and is_valid_now(f)])
+
+        before = beta_count()
+        add(mcp, GROUP_A, "owner-beta-again", OWNER_BETA)
+        time.sleep(PROCESS_TIMEOUT // 4)
+        wait_for(lambda: mcp.call("get_status", {}) or True, "server idle")
+        after = beta_count()
+        assert after == before, f"valid Beta facts went from {before} to {after}"
+
+    check("write then find", write_then_find)
+    check("contradiction invalidates old fact, keeps history", contradiction_invalidates)
+    check("group isolation", group_isolation)
+    check("duplicate episode is idempotent", duplicate_is_idempotent)
+    clear(mcp)
+    print(f"elapsed {time.time() - t0:.0f}s")
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

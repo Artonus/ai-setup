@@ -30,16 +30,15 @@ Do not use them for refactoring, writing scripts from scratch, debugging busines
 3. Call `query-docs` with that ID and the user's full question, not single words.
 4. Answer from the fetched docs.
 
-## Memory (Trilium)
+## Memory (agent-memory)
 
-When the Trilium tools are available, use them as persistent memory. The `Memory` note tree has `Global` (`La2EPRPZznwZ`) and `Projects` (`BAWuYX9Hbpcy`, one child note per repo, titled with the repo name). Every memory is one short note labelled `#memory`, plus `#scope=global` or `#scope=project`, `#project=<repo>` for project scope, and `#core` for critical facts.
+When the `agent-memory` tools are available (a Graphiti knowledge graph; tools `search_memory_facts`, `search_nodes`, `add_memory`, `get_episodes`, `delete_episode`), use them as persistent memory. Facts are stored per `group_id`: `personal` is the default; a work overlay sets `work`. Always pass the same `group_id` when writing and reading.
 
-- **Recall first.** At the start of a task, call `memory_search` (the `memory-search` MCP) with a short description of the task; it ranks memories by meaning, so it finds them even when worded differently or in another language. Then search `#memory` with exact keywords (ticket ids, file names) and `#project=<repo>` for the current repo. Read a hit in full before relying on it. Use what you find; do not ask the user for facts already stored. If `memory_search` is unavailable, fall back to keyword search.
-- **Route by kind.** User preference or personal fact: Global with `#core`. Cross-project convention: Global. Project decision, bug root cause, gotcha: under `Projects/<repo>` (create the repo note if missing). Critical project fact: same, with `#core`.
-- **Store after** learning a preference or workflow, making a design decision, fixing a bug (root cause plus fix), choosing tooling, or finding a gotcha. Keep each note concise: a clear title and a few lines.
-- **Update, don't duplicate.** Search before storing, with `memory_search` too. If a memory exists but is outdated or wrong, edit that note; delete it only if it no longer applies.
-- **Do not store** trivia, anything already stored, temporary debugging output, secrets or credentials.
-- Ask before deleting a memory note.
+- **Recall first.** At the start of a task, call `search_memory_facts` with a short description of the task and `group_ids`. Add `search_nodes` for a named service, person or ticket. Use what you find; do not ask the user for facts already stored. Facts the server has marked invalid are outdated; do not rely on them.
+- **Store after** a decision, a state change ("X now owns Y"), a bug root cause with its fix, a tooling choice, a gotcha, or a stated preference. One `add_memory` call per atomic, dated statement written as a plain sentence naming its subject ("As of 2026-11-15 the billing-service retry job is owned by team Beta."). Give `name` a short title and pass `group_id`.
+- **Change, don't pile up.** When a fact changes, add the new one as a new episode; the server invalidates the contradicted fact and keeps its history. Use `delete_episode` only for a wrong or unwanted episode, and ask the user first.
+- **Cost.** Every episode runs several LLM calls. Batch related facts into one episode and skip trivia, anything already stored, temporary debugging output, secrets and credentials.
+- **Unavailable.** If the tools are missing or a call fails, carry on without memory, say so in one line and do not retry in a loop.
 
 ## Notes (Trilium)
 
