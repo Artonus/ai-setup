@@ -151,7 +151,7 @@ def _verb_words(policy: dict) -> List[str]:
     return sorted(words)
 
 
-def _invocation(inv: Invocation, policy: dict, names: List[str], command: str = "") -> Decision:
+def _tool_rules(inv: Invocation, policy: dict, names: List[str], command: str = "") -> Decision:
     if inv.opaque and _mentions(command or inv.raw, names):
         return _ask("dynamic-sensitive", "command cannot be analysed and mentions a sensitive tool")
     if not inv.argv:
@@ -179,14 +179,262 @@ def _invocation(inv: Invocation, policy: dict, names: List[str], command: str = 
     return Decision()
 
 
-def explain_bash(command: str, policy: dict, ctx: Ctx) -> List[Tuple[Invocation, Decision]]:
-    names = _sensitive_names(policy)
-    return [(inv, _invocation(inv, policy, names, command)) for inv in unwrap(parse_command(command))]
+# ---- path rules ------------------------------------------------------------
+
+_HOME_TMP_VAR = re.compile(r"\$\{(HOME|TMPDIR)\}|\$(HOME|TMPDIR)(?![A-Za-z0-9_])")
 
 
-def decide_bash(command: str, policy: dict, ctx: Ctx) -> Decision:
+def _tmp_alias(p: str) -> str:
+    """/private/tmp and /tmp are the same root."""
+    return "/tmp" + p[len("/private/tmp") :] if p == "/private/tmp" or p.startswith("/private/tmp/") else p
+
+
+def _lex(path: str) -> str:
+    """Absolute path with `..` resolved but symlinks kept."""
+    return _tmp_alias(os.path.normpath(path))
+
+
+def _real(path: str) -> str:
+    return _tmp_alias(os.path.realpath(path))
+
+
+def _forms(path: str) -> List[str]:
+    """The path as written and with symlinks resolved: a rule matches either."""
+    return [path, _real(path)]
+
+
+def resolve_target(word: str, cwd: Optional[str], ctx: Ctx) -> Optional[str]:
+    """Absolute path for a word, or None when it is dynamic or cannot be resolved."""
+    if not word:
+        return None
+    if word == "~" or word.startswith("~/"):
+        if not ctx.home:
+            return None
+        word = ctx.home + word[1:]
+
+    def sub(m: "re.Match[str]") -> str:
+        if (m.group(1) or m.group(2)) == "HOME":
+            return ctx.home or "$"
+        return os.environ.get("TMPDIR") or (ctx.tmp_roots[0] if ctx.tmp_roots else "$")
+
+    word = _HOME_TMP_VAR.sub(sub, word)
+    if "$" in word or "`" in word or word.startswith(("<(", ">(")):
+        return None
+    if not os.path.isabs(word):
+        if not cwd:
+            return None
+        word = os.path.join(cwd, word)
+    return _lex(word)
+
+
+def _under(path: str, root: str) -> bool:
+    return bool(root) and (path == root or path.startswith(root.rstrip("/") + "/"))
+
+
+def _expand_home(pattern: str, ctx: Ctx) -> str:
+    return ctx.home + pattern[1:] if pattern == "~" or pattern.startswith("~/") else pattern
+
+
+def _in_any(path: str, patterns: List[str], ctx: Ctx) -> bool:
+    roots = [r for p in patterns for r in _forms(_lex(_expand_home(p, ctx)))]
+    return any(_under(f, r) for f in _forms(path) for r in roots)
+
+
+def _is_secret(path: str, policy: dict, ctx: Ctx) -> bool:
+    for form in _forms(path):
+        if any(fnmatch.fnmatchcase(os.path.basename(form), e) for e in policy.get("secretExcept", [])):
+            continue
+        for pat in policy.get("secretPaths", []):
+            glob = "*/" + pat[3:] if pat.startswith("**/") else _expand_home(pat, ctx)
+            if fnmatch.fnmatchcase(form, glob):
+                return True
+    return False
+
+
+def _outside(path: str, ctx: Ctx) -> bool:
+    roots = [r for r in [ctx.project_dir] + list(ctx.tmp_roots) if r]
+    return not any(_under(_real(path), _real(r)) for r in roots)
+
+
+def _protected(path: Optional[str], policy: dict, ctx: Ctx) -> Decision:
+    """ai-setup or protected-path ask for a resolved path; none otherwise."""
+    if path is None:
+        return Decision()
+    ai = policy.get("aiSetup", {})
+    if _in_any(path, ai.get("paths", []), ctx):
+        return _ask(ai.get("rule", "ai-setup"), ai.get("reason", "change the AI setup in the ai-setup repo"))
+    if _in_any(path, policy.get("protectedPaths", []), ctx):
+        return _ask("protected-path", "%s is a protected path" % path)
+    return Decision()
+
+
+def _safe_target(path: str, policy: dict) -> bool:
+    return any(fnmatch.fnmatchcase(path, g) for g in policy.get("fileRules", {}).get("safeTargets", []))
+
+
+def _destructive_target(word: str, cwd: Optional[str], policy: dict, ctx: Ctx, verb: str) -> Decision:
+    rule = policy.get("fileRules", {}).get("rule", "file-destructive")
+    path = resolve_target(word, cwd, ctx)
+    if path is None:
+        return _ask(rule, "%s target %s is dynamic or cannot be resolved" % (verb, word))
+    if _safe_target(path, policy):
+        return Decision()
+    prot = _protected(path, policy, ctx)
+    if prot.decision != "none":
+        return prot
+    if _outside(path, ctx):
+        return _ask(rule, "%s target %s is outside the project" % (verb, path))
+    return Decision()
+
+
+def _write_target(word: str, cwd: Optional[str], policy: dict, ctx: Ctx, verb: str) -> Decision:
+    """Overwrite of a path: protected always asks, other paths only when they exist."""
+    cfg = policy.get("fileRules", {})
+    path = resolve_target(word, cwd, ctx)
+    if path is None:
+        return _ask(cfg.get("rule", "file-destructive"), "%s target %s is dynamic or cannot be resolved" % (verb, word))
+    if _safe_target(path, policy):
+        return Decision()
+    prot = _protected(path, policy, ctx)
+    if prot.decision != "none":
+        return prot
+    if os.path.lexists(path) and _outside(path, ctx):
+        return _ask(cfg.get("rule", "file-destructive"), "%s overwrites %s outside the project" % (verb, path))
+    return Decision()
+
+
+def _worst(decisions: List[Decision]) -> Decision:
     best = Decision()
-    for _, d in explain_bash(command, policy, ctx):
+    for d in decisions:
         if _ORDER[d.decision] > _ORDER[best.decision]:
             best = d
     return best
+
+
+def _find_paths(argv: List[str]) -> List[str]:
+    paths: List[str] = []
+    for a in argv[1:]:
+        if re.match(r"^-([HLP]|O\d)$", a) and not paths:
+            continue
+        if a.startswith("-") or a in ("(", "!"):
+            break
+        paths.append(a)
+    return paths or ["."]
+
+
+def _file_rules(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> Decision:
+    cfg = policy.get("fileRules", {})
+    rule = cfg.get("rule", "file-destructive")
+    out: List[Decision] = []
+    name = os.path.basename(inv.argv[0]) if inv.argv else ""
+    destructive = cfg.get("destructive", {})
+    overwrite = cfg.get("overwrite", {})
+    if inv.via_xargs and (name in destructive or name in overwrite):
+        out.append(_ask(rule, "xargs %s runs with unknown targets" % name))
+    elif name in destructive:
+        for w, _ in _positionals(inv, destructive[name]):
+            out.append(_destructive_target(w, cwd, policy, ctx, name))
+    elif name == "find":
+        find = cfg.get("find", {})
+        argv = inv.argv
+        hit = any(a in find.get("actions", []) for a in argv)
+        for i, a in enumerate(argv[:-1]):
+            if a in find.get("execFlags", []) and os.path.basename(argv[i + 1]) in destructive:
+                hit = True
+        if hit:
+            for w in _find_paths(argv):
+                out.append(_destructive_target(w, cwd, policy, ctx, "find"))
+    elif name == "dd":
+        for a in inv.argv[1:]:
+            if a.startswith(cfg.get("ddOutput", "of=")):
+                out.append(_destructive_target(a.split("=", 1)[1], cwd, policy, ctx, "dd"))
+    elif name in overwrite:
+        vopts = overwrite[name]
+        pos = [w for w, _ in _positionals(inv, vopts)]
+        tdir = None
+        for i, a in enumerate(inv.argv[:-1]):
+            if a in ("-t", "--target-directory"):
+                tdir = inv.argv[i + 1]
+        dest, srcs = (tdir, pos) if tdir is not None else ((pos[-1], pos[:-1]) if len(pos) > 1 else (None, []))
+        if dest is not None:
+            dpath = resolve_target(dest, cwd, ctx)
+            if dpath is not None and os.path.isdir(dpath):
+                for s in srcs:
+                    base = os.path.basename(s.rstrip("/"))
+                    if "$" in base or "`" in base:
+                        out.append(_ask(rule, "%s source %s is dynamic" % (name, s)))
+                    else:
+                        out.append(_write_target(os.path.join(dpath, base), cwd, policy, ctx, name))
+            else:
+                out.append(_write_target(dest, cwd, policy, ctx, name))
+    for op, target in inv.redirects:
+        if op.lstrip("0123456789") in cfg.get("writeRedirects", []):
+            if target.isdigit() or target == "-":
+                continue
+            out.append(_write_target(target, cwd, policy, ctx, "redirect"))
+    return _worst(out)
+
+
+def _secret_reads(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -> Decision:
+    words: List[str] = []
+    if inv.argv and os.path.basename(inv.argv[0]) in policy.get("secretReadTools", []):
+        words.extend(a for a in inv.argv[1:] if not a.startswith("-") or a == "-")
+    words.extend(t for op, t in inv.redirects if op.lstrip("0123456789") == "<")
+    for w in words:
+        path = resolve_target(w, cwd, ctx)
+        if path is not None and _is_secret(path, policy, ctx):
+            return Decision("deny", "secret-read", "%s holds secrets; do not read it" % path)
+    return Decision()
+
+
+def _invocation(inv: Invocation, policy: dict, names: List[str], command: str, ctx: Ctx, cwd: Optional[str]) -> Decision:
+    return _worst(
+        [_tool_rules(inv, policy, names, command), _file_rules(inv, policy, ctx, cwd), _secret_reads(inv, policy, ctx, cwd)]
+    )
+
+
+def _next_cwd(inv: Invocation, cwd: Optional[str], ctx: Ctx) -> Optional[str]:
+    """Working directory after the invocation, following `cd` best effort."""
+    if not inv.argv or os.path.basename(inv.argv[0]) != "cd":
+        return cwd
+    args = [a for a in inv.argv[1:] if a != "--" and not (a.startswith("-") and a != "-")]
+    if not args:
+        return _lex(ctx.home) if ctx.home else None
+    return resolve_target(args[0], cwd, ctx)
+
+
+def explain_bash(command: str, policy: dict, ctx: Ctx) -> List[Tuple[Invocation, Decision]]:
+    names = _sensitive_names(policy)
+    cwd: Optional[str] = ctx.cwd or ctx.project_dir or None
+    out: List[Tuple[Invocation, Decision]] = []
+    for inv in unwrap(parse_command(command)):
+        out.append((inv, _invocation(inv, policy, names, command, ctx, cwd)))
+        cwd = _next_cwd(inv, cwd, ctx)
+    return out
+
+
+def decide_bash(command: str, policy: dict, ctx: Ctx) -> Decision:
+    return _worst([d for _, d in explain_bash(command, policy, ctx)])
+
+
+def decide_path(tool: str, path: str, policy: dict, ctx: Ctx) -> Decision:
+    """Decision for a file tool (Write, Edit, MultiEdit, NotebookEdit, Read)."""
+    kind = policy.get("pathTools", {}).get(str(tool).lower())
+    if kind is None:
+        return Decision()
+    cwd = ctx.cwd or ctx.project_dir or None
+    resolved = resolve_target(path, cwd, ctx)
+    if resolved is None:
+        if kind == "read":
+            return Decision()
+        return _ask("protected-path", "%s path %s is dynamic or cannot be resolved" % (tool, path))
+    if kind == "read":
+        if _is_secret(resolved, policy, ctx):
+            return Decision("deny", "secret-read", "%s holds secrets; do not read it" % resolved)
+        return Decision()
+    prot = _protected(resolved, policy, ctx)
+    if prot.decision != "none":
+        return prot
+    if _outside(resolved, ctx):
+        return _ask("protected-path", "%s writes %s outside the project" % (tool, resolved))
+    return Decision()

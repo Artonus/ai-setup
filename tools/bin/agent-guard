@@ -2,6 +2,7 @@
 """agent-guard: policy helper for AI agent shell commands.
 
 Usage: agent-guard parse|check|explain '<command>'
+       agent-guard check-path <tool> <path>
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 
 from agent_guard.parse import parse_command  # noqa: E402
-from agent_guard.rules import Ctx, decide_bash, explain_bash, load_policy  # noqa: E402
+from agent_guard.rules import Ctx, decide_bash, decide_path, explain_bash, load_policy  # noqa: E402
 from agent_guard.unwrap import unwrap  # noqa: E402
 
 
@@ -41,7 +42,11 @@ def main(argv: list) -> int:
             tail = "%s\t%s" % (d.rule, d.reason) if d.decision != "none" else ""
             print("\t".join([json.dumps(inv.argv), d.decision, tail]).rstrip("\t"))
         return 0
-    print("usage: agent-guard parse|check|explain '<command>'", file=sys.stderr)
+    if len(argv) == 4 and argv[1] == "check-path":
+        d = decide_path(argv[2], argv[3], _policy(), _ctx())
+        print("none" if d.decision == "none" else "\t".join([d.decision, d.rule, d.reason]))
+        return 0
+    print("usage: agent-guard parse|check|explain '<command>' | check-path <tool> <path>", file=sys.stderr)
     return 2
 
 

@@ -70,5 +70,30 @@
     ]
   },
   "protectedPaths": ["~/.ssh", "~/.aws", "~/.claude", "~/.config", "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.bashrc", "~/.bash_profile", "~/.profile"],
-  "secretPaths": ["~/.ssh/id_*", "~/.aws/credentials", ".env*"]
+  "aiSetup": {
+    "rule": "ai-setup",
+    "reason": "change the AI setup in the ai-setup repo",
+    "paths": ["~/.claude", "~/.config/opencode"]
+  },
+  "secretPaths": ["~/.ssh/id_*", "~/.aws/credentials", "**/.env", "**/.env.*"],
+  "secretExcept": ["*.pub"],
+  "secretReadTools": ["cat", "head", "tail", "less", "more", "grep", "cp", "mv", "source", "."],
+  "pathTools": {"read": "read", "write": "write", "edit": "edit", "multiedit": "edit", "notebookedit": "edit"},
+  "fileRules": {
+    "rule": "file-destructive",
+    "destructive": {
+      "rm": [],
+      "rmdir": [],
+      "shred": ["-n", "--iterations", "-s", "--size", "--random-source"],
+      "truncate": ["-s", "--size", "-r", "--reference"]
+    },
+    "overwrite": {
+      "mv": ["-t", "--target-directory", "-S", "--suffix"],
+      "cp": ["-t", "--target-directory", "-S", "--suffix"]
+    },
+    "find": {"actions": ["-delete"], "execFlags": ["-exec", "-execdir", "-ok", "-okdir"]},
+    "ddOutput": "of=",
+    "writeRedirects": [">", ">>", ">|", "&>", "&>>", ">&"],
+    "safeTargets": ["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/*"]
+  }
 }
