@@ -118,6 +118,7 @@ test("edit and write pass the path to decide", async () => {
   }
   await h.evaluate(permEvt({ action: "read", resources: ["/a/b"] }));
   assert.equal(lastRequest().tool, "read");
+  assert.equal(lastRequest().path, "/a/b");
 });
 
 test("subprocess failure asks in enforce and is silent in shadow", async () => {
@@ -185,4 +186,62 @@ test("hooks never throw on malformed events", async () => {
   await h["execute.before"]({ tool: "shell", id: "z" });
   await h.evaluate(null);
   await h.evaluate({ action: "shell" });
+});
+
+test("adapter exception asks in enforce and is silent in shadow", async () => {
+  const h = await load();
+  stubOut("none", true, "");
+  for (const mode of ["enforce", "shadow"]) {
+    policy(mode);
+    const ev = permEvt({ action: "shell", resources: "x" });
+    await h.evaluate(ev);
+    assert.equal(ev.effect, mode === "enforce" ? "ask" : "allow", mode);
+    assert.equal(ev.message, mode === "enforce" ? "agent-guard: guard unavailable" : undefined);
+  }
+});
+
+test("unrecognised decide replies count as guard unavailable", async () => {
+  const h = await load();
+  for (const out of ["{}", "[]", '{"decision":"maybe","enforced":true}', '{"decision":"ask"}']) {
+    for (const mode of ["enforce", "shadow"]) {
+      policy(mode);
+      process.env.STUB_OUT = out;
+      const ev = permEvt({ action: "shell", resources: ["ls"] });
+      await h.evaluate(ev);
+      assert.equal(ev.effect, mode === "enforce" ? "ask" : "allow", `${out} ${mode}`);
+      assert.equal(ev.message, mode === "enforce" ? "agent-guard: guard unavailable" : undefined);
+    }
+  }
+});
+
+test("no buildable request counts as guard unavailable", async () => {
+  const h = await load();
+  stubOut("none", true, "");
+  const cases = [{ action: "shell", resources: [] }, { action: "shell" }, { action: "read", resources: [] }, { action: "edit" }, { action: "write", resources: [] }];
+  for (const mode of ["enforce", "shadow"]) {
+    policy(mode);
+    for (const c of cases) {
+      const ev = permEvt(c);
+      await h.evaluate(ev);
+      assert.equal(ev.effect, mode === "enforce" ? "ask" : "allow", `${c.action} ${mode}`);
+      assert.equal(ev.message, mode === "enforce" ? "agent-guard: guard unavailable" : undefined);
+    }
+  }
+});
+
+test("reason is coerced, capped and defaulted", async () => {
+  policy("enforce");
+  const h = await load();
+  process.env.STUB_OUT = JSON.stringify({ decision: "ask", enforced: true, reason: "x".repeat(900) });
+  let ev = permEvt({ action: "shell", resources: ["ls"] });
+  await h.evaluate(ev);
+  assert.equal(ev.message.length, 500);
+  process.env.STUB_OUT = JSON.stringify({ decision: "deny", enforced: true });
+  ev = permEvt({ action: "shell", resources: ["ls"] });
+  await h.evaluate(ev);
+  assert.equal(ev.message, "agent-guard");
+  process.env.STUB_OUT = JSON.stringify({ decision: "deny", enforced: true, reason: 42 });
+  ev = permEvt({ action: "shell", resources: ["ls"] });
+  await h.evaluate(ev);
+  assert.equal(ev.message, "42");
 });

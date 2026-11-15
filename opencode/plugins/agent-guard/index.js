@@ -43,6 +43,7 @@ function policyIsEnforce() {
 }
 
 function decide(request) {
+  // spawnSync blocks the event loop for up to 2 s per request (a multi-resource shell fallback can cost 2 s per resource).
   const r = spawnSync(process.env.AGENT_GUARD_BIN || "agent-guard", ["decide"], {
     input: JSON.stringify(request),
     encoding: "utf8",
@@ -52,10 +53,16 @@ function decide(request) {
   if (r.error || r.status !== 0) return null;
   try {
     const out = JSON.parse(r.stdout);
-    return out && typeof out === "object" ? out : null;
+    const valid = out && typeof out === "object" && typeof out.enforced === "boolean" && ["none", "ask", "deny"].includes(out.decision);
+    return valid ? out : null;
   } catch {
     return null;
   }
+}
+
+function reasonText(reason) {
+  const text = typeof reason === "string" ? reason : reason == null ? "" : String(reason);
+  return text.slice(0, 500) || "agent-guard";
 }
 
 function raise(ev, effect, message) {
@@ -81,13 +88,15 @@ function requestsFor(ev) {
 function evaluate(ev) {
   if (!ev || !(ev.action in TOOLS)) return;
   const enforce = policyIsEnforce();
-  for (const req of requestsFor(ev)) {
+  const reqs = requestsFor(ev);
+  if (reqs.length === 0 && enforce) raise(ev, "ask", UNAVAILABLE); // no request could be built: guard unavailable
+  for (const req of reqs) {
     const res = decide(req);
     if (!res) {
       if (enforce) raise(ev, "ask", UNAVAILABLE);
     } else if (res.enforced === true) {
-      if (res.decision === "deny") raise(ev, "deny", res.reason);
-      else if (res.decision === "ask") raise(ev, "ask", res.reason);
+      if (res.decision === "deny") raise(ev, "deny", reasonText(res.reason));
+      else if (res.decision === "ask") raise(ev, "ask", reasonText(res.reason));
     }
   }
 }
@@ -97,7 +106,10 @@ function safe(fn) {
     try {
       await fn(e);
     } catch {
-      // hooks must never throw
+      // hooks must never throw; in enforce an adapter bug must not fail open
+      try {
+        if (e && typeof e === "object" && e.action in TOOLS && policyIsEnforce()) raise(e, "ask", UNAVAILABLE);
+      } catch {}
     }
   };
 }
