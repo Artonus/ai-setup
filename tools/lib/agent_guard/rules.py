@@ -211,6 +211,12 @@ def resolve_target(word: str, cwd: Optional[str], ctx: Ctx) -> Optional[str]:
         if not ctx.home:
             return None
         word = ctx.home + word[1:]
+    elif word.startswith("~"):  # ~user, ~+, ~-: a user's home, only when it resolves
+        user, slash, rest = word[1:].partition("/")
+        home = os.path.expanduser("~" + user) if re.match(r"^[A-Za-z_][A-Za-z0-9_.-]*$", user) else "~"
+        if home.startswith("~"):
+            return None
+        word = home + slash + rest
 
     def sub(m: "re.Match[str]") -> str:
         if (m.group(1) or m.group(2)) == "HOME":
@@ -382,6 +388,11 @@ def _secret_reads(inv: Invocation, policy: dict, ctx: Ctx, cwd: Optional[str]) -
     words.extend(t for op, t in inv.redirects if op.lstrip("0123456789") == "<")
     for w in words:
         path = resolve_target(w, cwd, ctx)
+        if re.match(r"^~[^/]", w):  # ~user/rest: test rest under our home too
+            rest = "/" + w.partition("/")[2] if "/" in w else ""
+            alt = resolve_target("~" + rest, cwd, ctx)
+            if alt is not None and _is_secret(alt, policy, ctx):
+                return Decision("deny", "secret-read", "%s holds secrets; do not read it" % w)
         if path is not None and _is_secret(path, policy, ctx):
             return Decision("deny", "secret-read", "%s holds secrets; do not read it" % path)
     return Decision()

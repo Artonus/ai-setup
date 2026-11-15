@@ -110,3 +110,5 @@ ls > /dev/null 2>&1	none
 echo hi > ~/.zshrc	ask
 find / -delete	ask
 ls -la	none
+rm ~root/x	ask
+ls ~root	none

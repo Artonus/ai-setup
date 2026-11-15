@@ -113,3 +113,17 @@ test_ag_paths_check_path() {
   assert_eq none "$(ag_ppath Bogus '~/.zshrc')" "unknown tool has no opinion"
   rm -rf "$T"
 }
+
+test_ag_paths_tilde_user_forms() {
+  ag_path_setup
+  local me
+  me="$(id -un)"
+  assert_eq ask "$(ag_pcheck 'rm ~root/x' | cut -f1)" "rm ~root/x"
+  assert_eq ask "$(ag_pcheck "rm ~$me/.ssh/config" | cut -f1)" "rm ~user/.ssh/config"
+  assert_eq ask "$(ag_pcheck 'rm ~nosuchuser_zz/x' | cut -f1)" "rm of an unresolvable ~user"
+  assert_eq ask "$(ag_pcheck 'rm ~+/x' | cut -f1)" "rm ~+/x"
+  assert_eq deny "$(ag_pcheck "cat ~$me/.ssh/id_rsa" | cut -f1)" "cat ~user/.ssh/id_rsa"
+  assert_eq deny "$(ag_pcheck 'cat ~nosuchuser_zz/.ssh/id_rsa' | cut -f1)" "cat unresolvable ~user key"
+  assert_eq none "$(ag_pcheck 'ls ~root' | cut -f1)" "ls ~root"
+  rm -rf "$AG_T"
+}
