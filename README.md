@@ -110,18 +110,22 @@ are embedded again. Try it with `memory-search-mcp --query "some words"`.
 
 `agent-guard` gates risky agent actions before they run, in OpenCode (the `plugins/agent-guard` plugin) and in
 Claude Code (a `PreToolUse` hook in `claude/settings.json` that calls `agent-guard claude`, blocking on failure).
-It asks for confirmation on database clients, cluster and cloud mutations, force-push and deletes, and on reads
-or writes of secret and protected paths. The rules live in `shared/agent-guard/policy.json`.
+It asks for confirmation on database clients, cluster and cloud mutations, history rewrites, force-push and deletes
+(including of `.git` and the project root), and on writes to protected paths; it denies commands that read secret
+files (SSH keys, `.env`) outright. The rules live in `shared/agent-guard/policy.json`.
 
 - **Modes.** `mode` is `shadow` (the shipped default: every decision is only logged, nothing is blocked) or
-  `enforce` (the guard asks or blocks). Run in shadow for a while, review the log, then switch the mode in your overlay.
+  `enforce` (the guard asks or blocks). Run in shadow for a while, review the log, then switch the mode in your overlay: put `{"mode": "enforce"}` in the overlay's `shared/agent-guard/policy.json`.
+- **Rollout.** Run `./install.sh` right after pulling the commit that registers the hook: until the policy is
+  installed the guard falls back to the repo copy next to `tools/bin/agent-guard` (the log line says
+  `"policy": "repo-fallback"`), and a guard failure logs its cause in the `error` field.
 - **Log.** Each decision is one JSON line in `~/.local/state/agent-guard/decisions.jsonl`. Review it with
   `jq -r 'select(.decision!="none") | [.decision,.rule,.command] | @tsv' ~/.local/state/agent-guard/decisions.jsonl | sort | uniq -c | sort -rn`.
 - **Try a command.** `agent-guard check '<cmd>'` prints the decision for a command without running it.
 - **Extra policy keys.** `failClosedTools` lists tools whose commands cannot be parsed safely and are therefore
   always gated; `cloudRules` holds the cloud CLI rules.
 - **Known gaps.** The guard reads the command, not what it runs: project scripts and binaries the agent writes
-  itself are not inspected; wrappers it does not unwrap (such as `docker exec`) hide what they run; and a bare
+  itself are not inspected; wrappers it does not unwrap hide what they run (`docker exec` and `docker run` are unwrapped); and a bare
   dynamic command name with no sensitive word in it passes.
 
 ## Adding things
