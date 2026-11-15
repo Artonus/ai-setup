@@ -1,7 +1,7 @@
 // Tests for the OpenCode V2 agent-guard plugin (node --test).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plugin from "../opencode/plugins/agent-guard/index.js";
@@ -21,6 +21,8 @@ exit "\${STUB_EXIT:-0}"
 chmodSync(stub, 0o755);
 process.env.AGENT_GUARD_BIN = stub;
 process.env.STUB_IN = stdinFile;
+const logFile = join(dir, "decisions.jsonl");
+process.env.AGENT_GUARD_LOG = logFile; // never write the real decision log
 
 function policy(mode) {
   const p = join(dir, `policy-${mode}.json`);
@@ -244,4 +246,97 @@ test("reason is coerced, capped and defaulted", async () => {
   ev = permEvt({ action: "shell", resources: ["ls"] });
   await h.evaluate(ev);
   assert.equal(ev.message, "42");
+});
+
+test("every resource of a read, edit or write is checked, strictest wins", async () => {
+  policy("enforce");
+  const h = await load();
+  process.env.STUB_OUT = "";
+  // the stub answers per request: use a shell stub that denies only ~/.zshrc
+  const picky = join(dir, "picky.sh");
+  writeFileSync(
+    picky,
+    `#!/bin/sh
+in=$(cat); echo "$in" >> "$STUB_IN"
+case "$in" in
+  *zshrc*) printf '%s' '{"decision":"deny","rule":"r","reason":"protected","mode":"enforce","enforced":true}' ;;
+  *) printf '%s' '{"decision":"none","rule":"","reason":"","mode":"enforce","enforced":true}' ;;
+esac
+`,
+  );
+  chmodSync(picky, 0o755);
+  const saved = process.env.AGENT_GUARD_BIN;
+  process.env.AGENT_GUARD_BIN = picky;
+  try {
+    const ev = permEvt({ action: "edit", resources: ["/proj/a.txt", "~/.zshrc"] });
+    await h.evaluate(ev);
+    assert.equal(ev.effect, "deny");
+    assert.equal(ev.message, "protected");
+    assert.deepEqual(requests().slice(-2).map((r) => r.path), ["/proj/a.txt", "~/.zshrc"]);
+  } finally {
+    process.env.AGENT_GUARD_BIN = saved;
+  }
+});
+
+test("a weaker answer does not overwrite the message of a raised effect", async () => {
+  policy("enforce"); stubOut("ask", true, "second");
+  const h = await load();
+  const ev = permEvt({ action: "shell", resources: ["a", "b"], effect: "ask" });
+  ev.message = "first";
+  await h.evaluate(ev);
+  assert.equal(ev.effect, "ask");
+  assert.equal(ev.message, "first");
+});
+
+test("inherited object keys are not tools", async () => {
+  policy("enforce"); stubOut("deny", true, "x");
+  const h = await load();
+  for (const action of ["constructor", "toString", "__proto__"]) {
+    const ev = permEvt({ action, resources: ["x"] });
+    await h.evaluate(ev);
+    assert.equal(ev.effect, "allow", action);
+  }
+});
+
+test("the binary defaults to ~/bin/agent-guard and the policy honours XDG_CONFIG_HOME", async () => {
+  const home = join(dir, "fakehome");
+  mkdirSync(join(home, "bin"), { recursive: true });
+  const bin = join(home, "bin", "agent-guard");
+  writeFileSync(bin, `#!/bin/sh\ncat >> "$STUB_IN"; echo >> "$STUB_IN"\nprintf '%s' '{"decision":"ask","rule":"r","reason":"from home bin","mode":"enforce","enforced":true}'\n`);
+  chmodSync(bin, 0o755);
+  const xdg = join(dir, "xdg");
+  mkdirSync(join(xdg, "agent-guard"), { recursive: true });
+  writeFileSync(join(xdg, "agent-guard", "policy.json"), JSON.stringify({ mode: "enforce" }));
+  const saved = { b: process.env.AGENT_GUARD_BIN, p: process.env.AGENT_GUARD_POLICY, h: process.env.HOME, x: process.env.XDG_CONFIG_HOME };
+  delete process.env.AGENT_GUARD_BIN; delete process.env.AGENT_GUARD_POLICY;
+  process.env.HOME = home; process.env.XDG_CONFIG_HOME = xdg;
+  try {
+    const h = await load();
+    const ev = permEvt({ action: "shell", resources: ["ls"] });
+    await h.evaluate(ev);
+    assert.equal(ev.effect, "ask");
+    assert.equal(ev.message, "from home bin");
+  } finally {
+    for (const [k, v] of [["AGENT_GUARD_BIN", saved.b], ["AGENT_GUARD_POLICY", saved.p], ["HOME", saved.h], ["XDG_CONFIG_HOME", saved.x]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
+
+test("setup writes one plugin-loaded log line and never throws", async () => {
+  policy("shadow");
+  const before = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean).length : 0;
+  await load();
+  const lines = readFileSync(logFile, "utf8").split("\n").filter(Boolean);
+  assert.equal(lines.length, before + 1);
+  const e = JSON.parse(lines.at(-1));
+  assert.equal(e.source, "opencode");
+  assert.equal(e.tool, "setup");
+  assert.equal(e.decision, "none");
+  assert.equal(e.rule, "plugin-loaded");
+  assert.equal(e.mode, "shadow");
+  // an unwritable log path must not break setup
+  const saved = process.env.AGENT_GUARD_LOG;
+  process.env.AGENT_GUARD_LOG = join(dir, "decisions.jsonl", "nope");
+  try { await load(); } finally { process.env.AGENT_GUARD_LOG = saved; }
 });

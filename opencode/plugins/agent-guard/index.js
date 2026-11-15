@@ -1,9 +1,9 @@
 // agent-guard for OpenCode V2. All policy lives in `agent-guard decide`;
 // this plugin only correlates shell commands, calls the CLI and raises effects.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const TTL_MS = 120_000;
 const MAX_ENTRIES = 500;
@@ -32,9 +32,14 @@ function takeShell(ev) {
   return Date.now() - hit.at > TTL_MS ? null : hit;
 }
 
+function policyPath() {
+  const config = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return process.env.AGENT_GUARD_POLICY || join(config, "agent-guard", "policy.json");
+}
+
 function policyIsEnforce() {
   try {
-    const p = process.env.AGENT_GUARD_POLICY || join(homedir(), ".config", "agent-guard", "policy.json");
+    const p = policyPath();
     const mode = JSON.parse(readFileSync(p, "utf8")).mode;
     return mode !== "shadow"; // invalid or missing mode counts as enforce
   } catch {
@@ -44,7 +49,7 @@ function policyIsEnforce() {
 
 function decide(request) {
   // spawnSync blocks the event loop for up to 2 s per request (a multi-resource shell fallback can cost 2 s per resource).
-  const r = spawnSync(process.env.AGENT_GUARD_BIN || "agent-guard", ["decide"], {
+  const r = spawnSync(process.env.AGENT_GUARD_BIN || join(homedir(), "bin", "agent-guard"), ["decide"], {
     input: JSON.stringify(request),
     encoding: "utf8",
     timeout: TIMEOUT_MS,
@@ -67,8 +72,10 @@ function reasonText(reason) {
 
 function raise(ev, effect, message) {
   const rank = { allow: 0, ask: 1, deny: 2 };
-  if ((rank[effect] ?? 0) > (rank[ev.effect] ?? 0)) ev.effect = effect;
-  ev.message = message;
+  if ((rank[effect] ?? 0) > (rank[ev.effect] ?? 0)) {
+    ev.effect = effect;
+    ev.message = message;
+  }
 }
 
 // --- V2 API assumption: evaluate event fields (action, resources, agent, sessionID) ---
@@ -76,8 +83,9 @@ function requestsFor(ev) {
   const tool = TOOLS[ev.action];
   const base = { source: "opencode", tool, session_id: ev.sessionID ?? "", agent_id: ev.sessionID ?? "", agent_type: ev.agent ?? "" };
   if (tool !== "bash") {
-    const path = ev.resources?.[0];
-    return path ? [{ ...base, path, cwd: process.cwd(), project_dir: process.cwd() }] : [];
+    return (ev.resources ?? [])
+      .filter((path) => typeof path === "string" && path)
+      .map((path) => ({ ...base, path, cwd: process.cwd(), project_dir: process.cwd() }));
   }
   const hit = takeShell(ev);
   const cwd = hit?.workdir || process.cwd();
@@ -86,7 +94,7 @@ function requestsFor(ev) {
 }
 
 function evaluate(ev) {
-  if (!ev || !(ev.action in TOOLS)) return;
+  if (!ev || !Object.hasOwn(TOOLS, ev.action)) return;
   const enforce = policyIsEnforce();
   const reqs = requestsFor(ev);
   if (reqs.length === 0 && enforce) raise(ev, "ask", UNAVAILABLE); // no request could be built: guard unavailable
@@ -108,10 +116,37 @@ function safe(fn) {
     } catch {
       // hooks must never throw; in enforce an adapter bug must not fail open
       try {
-        if (e && typeof e === "object" && e.action in TOOLS && policyIsEnforce()) raise(e, "ask", UNAVAILABLE);
+        if (e && typeof e === "object" && Object.hasOwn(TOOLS, e.action) && policyIsEnforce()) raise(e, "ask", UNAVAILABLE);
       } catch {}
     }
   };
+}
+
+// One log line per plugin load, so "the plugin never ran" is detectable. Never throws, never blocks.
+function logLoaded() {
+  try {
+    const file = process.env.AGENT_GUARD_LOG || join(homedir(), ".local", "state", "agent-guard", "decisions.jsonl");
+    let mode = "";
+    try {
+      const m = JSON.parse(readFileSync(policyPath(), "utf8")).mode;
+      if (m === "shadow" || m === "enforce") mode = m;
+    } catch {}
+    mkdirSync(dirname(file), { recursive: true });
+    const entry = {
+      ts: new Date().toISOString(),
+      source: "opencode",
+      session_id: "",
+      agent_id: "",
+      agent_type: "",
+      permission_mode: "",
+      tool: "setup",
+      decision: "none",
+      rule: "plugin-loaded",
+      mode,
+      command: "",
+    };
+    appendFileSync(file, JSON.stringify(entry) + "\n", { mode: 0o600 });
+  } catch {}
 }
 
 export default {
@@ -119,6 +154,7 @@ export default {
   async setup(ctx) {
     // V1 loaders pass a different context: do nothing there.
     if (typeof ctx?.tool?.hook !== "function" || typeof ctx?.permission?.hook !== "function") return;
+    logLoaded();
     await ctx.tool.hook("execute.before", safe(rememberShell));
     await ctx.permission.hook("evaluate", safe(evaluate));
   },
