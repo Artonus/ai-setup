@@ -4,6 +4,7 @@
 Usage: agent-guard parse|check|explain '<command>'
        agent-guard check-path <tool> <path>
        agent-guard decide   (request JSON on stdin)
+       agent-guard claude   (Claude Code PreToolUse hook JSON on stdin)
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 
+from agent_guard.claude_hook import run_claude_hook  # noqa: E402
 from agent_guard.decision import make_ctx, run_decision  # noqa: E402
 from agent_guard.parse import parse_command  # noqa: E402
 from agent_guard.rules import Ctx, decide_bash, decide_path, explain_bash, load_policy  # noqa: E402
@@ -28,10 +30,27 @@ def _ctx() -> Ctx:
     return make_ctx()
 
 
-def _decide() -> int:
+def _paths() -> tuple:
     home = os.path.expanduser("~")
     policy = os.environ.get("AGENT_GUARD_POLICY") or os.path.join(home, ".config", "agent-guard", "policy.json")
     log_path = os.environ.get("AGENT_GUARD_LOG") or os.path.join(home, ".local", "state", "agent-guard", "decisions.jsonl")
+    return policy, log_path
+
+
+def _claude() -> int:
+    policy, log_path = _paths()
+    try:
+        text = sys.stdin.buffer.read().decode("utf-8", "replace")
+    except Exception:
+        text = ""
+    _, out = run_claude_hook(text, policy, log_path)
+    if out:
+        print(out)
+    return 0
+
+
+def _decide() -> int:
+    policy, log_path = _paths()
     try:
         request = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
@@ -60,7 +79,9 @@ def main(argv: list) -> int:
         return 0
     if len(argv) == 2 and argv[1] == "decide":
         return _decide()
-    print("usage: agent-guard parse|check|explain '<command>' | check-path <tool> <path> | decide", file=sys.stderr)
+    if len(argv) == 2 and argv[1] == "claude":
+        return _claude()
+    print("usage: agent-guard parse|check|explain '<command>' | check-path <tool> <path> | decide | claude", file=sys.stderr)
     return 2
 
 
