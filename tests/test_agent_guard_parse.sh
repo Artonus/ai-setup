@@ -98,3 +98,15 @@ test_ag_parse_output_is_json_lines() {
     assert_eq 0 "$?" "valid JSON lines for: $c"
   done
 }
+
+test_ag_parse_generic_wrappers() {
+  assert_contains "$(ag_parse 'watch -n 5 kubectl get pods')" '["kubectl","get","pods"]' "watch"
+  assert_contains "$(ag_parse 'nice -n 5 psql -c x')" '["psql","-c","x"]' "nice -n"
+  assert_contains "$(ag_parse 'nice -5 psql')" '["psql"]' "nice -N"
+  assert_contains "$(ag_parse 'ionice -c 3 -n 7 psql')" '["psql"]' "ionice"
+  assert_contains "$(ag_parse 'stdbuf -oL -e0 psql')" '["psql"]' "stdbuf"
+  assert_contains "$(ag_parse 'stdbuf -o L psql')" '["psql"]' "stdbuf separate mode"
+  assert_contains "$(ag_parse 'setsid psql')" '["psql"]' "setsid"
+  assert_contains "$(ag_parse 'doas -u root psql')" '["psql"]' "doas"
+  assert_contains "$(ag_parse "su -c 'kubectl delete ns x' root")" '["kubectl","delete","ns","x"]' "su -c"
+}

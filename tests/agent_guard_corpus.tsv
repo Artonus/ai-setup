@@ -26,7 +26,7 @@ sh -c 'psql -c "select 1"'	ask
 bash -c "kubectl delete ns x"	ask
 eval "psql -c x"	ask
 eval $CMD	ask
-echo psql | bash	none
+echo psql | bash	ask
 helm uninstall x	ask
 helm list	none
 helm repo list	none
@@ -83,3 +83,21 @@ echo "kubectl delete ns x"	none
 ls -la	none
 make deploy	none
 ./unknown-binary --x	none
+$K get pods	ask
+X=kubectl; $X delete ns y	ask
+$EDITOR notes.txt	none
+watch kubectl delete ns x	ask
+watch -n 5 kubectl get pods	none
+nice psql	ask
+nice -n 5 psql	ask
+nice ls	none
+ionice -c 3 psql	ask
+stdbuf -oL psql	ask
+setsid psql	ask
+doas -u root psql	ask
+su -c 'kubectl delete ns x' root	ask
+kubectl --context x delete pod p	ask
+git push origin HEAD:main --force	ask
+git push -fu origin main	ask
+aws --profile p s3 rm s3://b/k	ask
+terraform -chdir=d apply	ask

@@ -142,11 +142,22 @@ def _gated(inv: Invocation, name: str, policy: dict) -> Decision:
     return _ask(rule, "%s %s is not a read verb" % (name, verb))
 
 
-def _invocation(inv: Invocation, policy: dict, names: List[str]) -> Decision:
-    if inv.opaque and _mentions(inv.raw, names):
+def _verb_words(policy: dict) -> List[str]:
+    words = set()
+    for cfg in policy.get("verbGated", {}).values():
+        for rv in cfg.get("readVerbs", []):
+            toks = [t for t in rv.split() if "*" not in t]
+            words.update(toks[:1])
+    return sorted(words)
+
+
+def _invocation(inv: Invocation, policy: dict, names: List[str], command: str = "") -> Decision:
+    if inv.opaque and _mentions(command or inv.raw, names):
         return _ask("dynamic-sensitive", "command cannot be analysed and mentions a sensitive tool")
     if not inv.argv:
         return Decision()
+    if inv.dynamic[0] and (_mentions(command, names) or any(w in _verb_words(policy) for w in inv.argv[1:])):
+        return _ask("dynamic-sensitive", "dynamic command name next to a sensitive tool or verb")
     name = os.path.basename(inv.argv[0])
     if name in policy.get("failClosedTools", []):
         return _ask("dynamic-sensitive", "%s hides the command that runs" % name)
@@ -170,7 +181,7 @@ def _invocation(inv: Invocation, policy: dict, names: List[str]) -> Decision:
 
 def explain_bash(command: str, policy: dict, ctx: Ctx) -> List[Tuple[Invocation, Decision]]:
     names = _sensitive_names(policy)
-    return [(inv, _invocation(inv, policy, names)) for inv in unwrap(parse_command(command))]
+    return [(inv, _invocation(inv, policy, names, command)) for inv in unwrap(parse_command(command))]
 
 
 def decide_bash(command: str, policy: dict, ctx: Ctx) -> Decision:

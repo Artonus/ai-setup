@@ -61,6 +61,18 @@ def _wrapper_offset(name: str, args: List[str]) -> Optional[int]:
         return _skip_opts(args, set())
     if name == "exec":
         return _skip_opts(args, {"-a"})
+    if name == "nice":
+        return _skip_opts(args, {"-n", "--adjustment"})
+    if name == "ionice":
+        return _skip_opts(args, {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"})
+    if name == "watch":
+        return _skip_opts(args, {"-n", "--interval"})
+    if name == "stdbuf":
+        return _skip_opts(args, {"-i", "-o", "-e"})
+    if name == "setsid":
+        return _skip_opts(args, set())
+    if name == "doas":
+        return _skip_opts(args, {"-u", "-C"})
     if name == "sudo":
         return _skip_opts(args, {"-u", "-g", "-h", "-C", "-D", "-p", "-r", "-t", "-T", "-U"}, stop_assign=True)
     return None
@@ -160,6 +172,11 @@ def _step(inv: Invocation) -> List[Invocation]:
             inv.opaque = True  # reads its script from stdin or a file
             return []
         return parse_command(script)
+    if name == "su":
+        for k, a in enumerate(args):
+            if a in ("-c", "--command") and k + 1 < len(args):
+                return parse_command(args[k + 1])
+        return []
     if name == "eval":
         inv.opaque = True
         return []

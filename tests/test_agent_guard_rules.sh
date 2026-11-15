@@ -40,3 +40,8 @@ test_ag_never_crashes_on_odd_input() {
   ag_check "$big" >/dev/null 2>&1; assert_eq 0 "$?" "100 KB command"
   ag_check 'psql "abc' >/dev/null 2>&1; assert_eq 0 "$?" "unterminated quote"
 }
+
+test_ag_heredoc_into_shell_is_checked() {
+  assert_eq ask "$(ag_check $'sh <<EOF\nkubectl delete ns x\nEOF' | cut -f1)" "heredoc into sh"
+  assert_eq ask "$(ag_check $'bash <<EOF\nkubectl delete ns x\nEOF' | cut -f1)" "heredoc into bash"
+}
