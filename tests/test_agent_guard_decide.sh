@@ -94,6 +94,7 @@ test_ag_decide_bad_input() {
   out="$(ag_decide 'not json')"; rc=$?
   assert_eq 0 "$rc" "not json exit"
   assert_eq ask "$(jq -r .decision <<<"$out")" "not json decision"
+  assert_eq guard-error "$(jq -r .rule <<<"$out")" "not json rule"
   big="$(head -c 100000 /dev/zero | tr '\0' 'a')"
   out="$(ag_decide "$(ag_req "echo $big")")"; rc=$?
   assert_eq 0 "$rc" "big command exit"
@@ -101,7 +102,7 @@ test_ag_decide_bad_input() {
   assert_eq 1 "$(( $(tail -n1 "$AG_LOG" | jq -r '.command | length') <= 300 ))" "command capped"
   out="$(printf '{"source":"claude","tool":"bash","command":"echo \xff\xfe"}' | AGENT_GUARD_POLICY="$AG_D/policy.json" AGENT_GUARD_LOG="$AG_LOG" python3 "$ROOT/tools/bin/agent-guard" decide)"; rc=$?
   assert_eq 0 "$rc" "invalid utf-8 exit"
-  assert_contains "$(jq -r .decision <<<"$out")" "" "invalid utf-8 output is json"
+  assert_eq 1 "$(jq -e 'has("decision")' <<<"$out" >/dev/null && echo 1)" "invalid utf-8 output is json"
   case "$(jq -r .decision <<<"$out")" in ask|none) ok ;; *) fail "invalid utf-8 decision: $out" ;; esac
   rm -rf "$AG_D"
 }
@@ -121,5 +122,57 @@ test_ag_decide_broken_policy() {
   out="$(AG_POLICY="$AG_D/bad.json" ag_decide "$(ag_req 'ls')")"
   assert_eq enforce "$(jq -r .mode <<<"$out")" "mode from last log line"
   assert_eq true "$(jq -r .enforced <<<"$out")" "enforced from log mode"
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_masks_more_forms() {
+  ag_dec_setup shadow
+  local c line
+  for c in 'curl -H "Authorization: Bearer s3cr3tval" x' 'tool --password s3cr3tval' 'echo token: s3cr3tval' \
+           'echo password = s3cr3tval' 'curl -u user:s3cr3tval x' 'curl "https://h/p?api_key=s3cr3tval&a=1"' \
+           'tool --token=s3cr3tval'; do
+    ag_decide "$(ag_req "$c")" >/dev/null
+    line="$(tail -n1 "$AG_LOG")"
+    case $line in *s3cr3tval*) fail "leaked: $c" ;; *) ok ;; esac
+    assert_contains "$line" '***' "masked: $c"
+  done
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_heredoc_variants() {
+  ag_dec_setup shadow
+  local line
+  ag_decide "$(ag_req $'cat <<-EOF\n\tbodyone\n\tEOF')" >/dev/null
+  line="$(tail -n1 "$AG_LOG")"
+  case $line in *bodyone*) fail "<<-EOF body leaked" ;; *) ok ;; esac
+  assert_contains "$line" '<<heredoc>>' "<<-EOF marker"
+  ag_decide "$(ag_req $'cat <<\'EOF\'\nbodytwo\nEOF')" >/dev/null
+  line="$(tail -n1 "$AG_LOG")"
+  case $line in *bodytwo*) fail "quoted heredoc body leaked" ;; *) ok ;; esac
+  assert_contains "$line" '<<heredoc>>' "quoted marker"
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_invalid_mode_is_guard_error() {
+  ag_dec_setup shadow
+  local v out
+  for v in '"ENFORCE"' 1 null '{}'; do
+    jq --argjson m "$v" '.mode = $m' "$AG_D/policy.json" >"$AG_D/p2.json"
+    out="$(AG_POLICY="$AG_D/p2.json" ag_decide "$(ag_req 'ls')")"
+    assert_eq ask "$(jq -r .decision <<<"$out")" "mode $v decision"
+    assert_eq guard-error "$(jq -r .rule <<<"$out")" "mode $v rule"
+  done
+  jq 'del(.mode)' "$AG_D/policy.json" >"$AG_D/p2.json"
+  assert_eq guard-error "$(AG_POLICY="$AG_D/p2.json" ag_decide "$(ag_req 'ls')" | jq -r .rule)" "missing mode"
+  rm -rf "$AG_D"
+}
+
+test_ag_decide_unwritable_log() {
+  ag_dec_setup shadow
+  local out rc
+  mkdir -p "$AG_D/logdir"
+  out="$(printf '%s' "$(ag_req 'ls')" | AGENT_GUARD_POLICY="$AG_D/policy.json" AGENT_GUARD_LOG="$AG_D/logdir" python3 "$ROOT/tools/bin/agent-guard" decide)"; rc=$?
+  assert_eq 0 "$rc" "exit"
+  assert_eq none "$(jq -r .decision <<<"$out")" "decision still returned"
   rm -rf "$AG_D"
 }

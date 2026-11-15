@@ -23,9 +23,12 @@ def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
     try:
         try:
             policy = load_policy(policy_path)
-            mode = policy.get("mode") if policy.get("mode") in _MODES else "shadow"
+            if not isinstance(policy.get("mode"), str) or policy["mode"] not in _MODES:
+                raise ValueError("policy mode must be shadow or enforce")
+            mode = policy["mode"]
         except Exception:
-            mode = log.last_mode(log_path) if log.last_mode(log_path) in _MODES else "shadow"
+            last = log.last_mode(log_path)
+            mode = "enforce" if last == "enforce" else "shadow"
             raise
         if not isinstance(request, dict):
             raise ValueError("request is not a JSON object")
@@ -45,13 +48,17 @@ def run_decision(request: dict, policy_path: str, log_path: str) -> dict:
     try:
         tool = str(req.get("tool") or "").lower()
         subject = req.get("command") if tool == "bash" else req.get("path")
+        def text(key: str):
+            v = req.get(key, "")
+            return v if v is None or isinstance(v, str) else str(v)
+
         log.append(log_path, {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "source": req.get("source", ""),
-            "session_id": req.get("session_id", ""),
-            "agent_id": req.get("agent_id", ""),
-            "agent_type": req.get("agent_type", ""),
-            "permission_mode": req.get("permission_mode", ""),
+            "source": text("source"),
+            "session_id": text("session_id"),
+            "agent_id": text("agent_id"),
+            "agent_type": text("agent_type"),
+            "permission_mode": text("permission_mode"),
             "tool": tool,
             "decision": decision,
             "rule": rule,
