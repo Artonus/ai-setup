@@ -1,0 +1,74 @@
+{
+  "mode": "shadow",
+  "dbClients": ["psql", "mysql", "mariadb", "mongosh", "redis-cli", "sqlite3", "pg_restore", "kubectl cnpg"],
+  "failClosedTools": ["eval"],
+  "verbGated": {
+    "kubectl": {
+      "rule": "cluster-mutation",
+      "valueOpts": ["-n", "--namespace", "--context", "--cluster", "--kubeconfig", "--user", "-s", "--server"],
+      "readVerbs": ["get", "describe", "logs", "top", "events", "diff", "explain", "version", "api-resources", "config view"]
+    },
+    "helm": {
+      "rule": "cluster-mutation",
+      "valueOpts": ["-n", "--namespace", "--kube-context", "--kubeconfig"],
+      "readVerbs": ["list", "get", "status", "show", "search", "template", "lint", "version", "history", "repo list"]
+    },
+    "flux": {
+      "rule": "cluster-mutation",
+      "valueOpts": ["-n", "--namespace", "--context", "--kubeconfig"],
+      "readVerbs": ["get", "logs", "events", "check", "version", "tree", "stats"]
+    },
+    "talosctl": {
+      "rule": "cluster-mutation",
+      "valueOpts": ["-n", "--nodes", "-e", "--endpoints", "--talosconfig", "--context"],
+      "readVerbs": ["get", "read", "logs", "dmesg", "version", "health", "containers", "services"]
+    },
+    "aws": {
+      "rule": "cloud-mutation",
+      "valueOpts": ["--profile", "--region", "--output", "--endpoint-url", "--query", "--color", "--ca-bundle"],
+      "readVerbs": ["* describe-*", "* list-*", "* get-*", "* head-*", "s3 ls", "sts get-caller-identity", "dynamodb query", "dynamodb scan", "dynamodb batch-get-item"]
+    },
+    "terraform": {
+      "rule": "cloud-mutation",
+      "valueOpts": [],
+      "readVerbs": ["plan", "validate", "fmt", "show", "output", "version", "state list", "state show"]
+    },
+    "tofu": {
+      "rule": "cloud-mutation",
+      "valueOpts": [],
+      "readVerbs": ["plan", "validate", "fmt", "show", "output", "version", "state list", "state show"]
+    }
+  },
+  "cloudRules": [
+    {"tool": "aws", "match": "rds-data execute-statement", "rule": "db-cloud", "reason": "aws rds-data execute-statement runs SQL against a database"},
+    {"tool": "aws", "match": "rds delete-*", "rule": "db-cloud", "reason": "aws rds delete-* removes a database resource"},
+    {"tool": "aws", "match": "rds modify-*", "rule": "db-cloud", "reason": "aws rds modify-* changes a database resource"},
+    {"tool": "aws", "match": "rds reboot-*", "rule": "db-cloud", "reason": "aws rds reboot-* restarts a database"},
+    {
+      "tool": "aws",
+      "match": "dynamodb *",
+      "except": ["dynamodb describe-*", "dynamodb list-*", "dynamodb get-item", "dynamodb batch-get-item", "dynamodb query", "dynamodb scan"],
+      "rule": "db-cloud",
+      "reason": "aws dynamodb non-read verb changes data"
+    },
+    {"tool": "aws", "match": "ssm start-session", "rule": "cloud-session", "reason": "aws ssm start-session opens an interactive session"},
+    {"tool": "aws", "match": "ecs execute-command", "rule": "cloud-session", "reason": "aws ecs execute-command runs a command in a container"}
+  ],
+  "git": {
+    "rule": "git-destructive",
+    "valueOpts": ["-C", "-c", "--git-dir", "--work-tree", "--namespace"],
+    "patterns": [
+      {"verb": "push", "args": ["--force", "--delete", "--mirror"], "argPrefixes": ["--force-with-lease", "+", ":"], "shortChars": ["f", "d"], "reason": "git push can overwrite or delete remote history"},
+      {"verb": "reset", "args": ["--hard"], "reason": "git reset --hard discards local changes"},
+      {"verb": "branch", "args": ["--delete"], "shortChars": ["D", "d"], "reason": "git branch delete removes a branch"},
+      {"verb": "clean", "args": ["--force"], "shortChars": ["f"], "reason": "git clean -f deletes untracked files"},
+      {"verb": "checkout", "args": [".", "--"], "reason": "git checkout . or -- discards local changes"},
+      {"verb": "restore", "args": ["."], "reason": "git restore . discards local changes"},
+      {"verb": "stash", "sub": ["drop", "clear"], "reason": "git stash drop or clear loses stashed work"},
+      {"verb": "reflog", "sub": ["expire"], "reason": "git reflog expire removes recovery points"},
+      {"verb": "gc", "argPrefixes": ["--prune"], "reason": "git gc --prune deletes unreachable objects"}
+    ]
+  },
+  "protectedPaths": ["~/.ssh", "~/.aws", "~/.claude", "~/.config", "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.bashrc", "~/.bash_profile", "~/.profile"],
+  "secretPaths": ["~/.ssh/id_*", "~/.aws/credentials", ".env*"]
+}

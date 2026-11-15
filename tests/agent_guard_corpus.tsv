@@ -1,0 +1,85 @@
+# command<TAB>expected (none|ask|deny). Run by test_ag_corpus_matches.
+psql -c "drop table x"	ask
+psql	ask
+mysql -e "select 1"	ask
+mariadb	ask
+mongosh	ask
+redis-cli flushall	ask
+sqlite3 a.db ".tables"	ask
+pg_restore -d x dump	ask
+kubectl cnpg status x	ask
+sudo psql	ask
+kubectl get pods -n x	none
+kubectl -n x get pods	none
+kubectl describe pod p	none
+kubectl config view	none
+kubectl config use-context x	ask
+kubectl delete ns demo	ask
+timeout 5 kubectl delete ns demo	ask
+kubectl exec p -- psql	ask
+kubectl exec p -- ls	ask
+kubectl $VERB pods	ask
+kubectl get $X	none
+kubectl get pods | xargs kubectl delete	ask
+kubectl get pods | xargs kubectl get	ask
+sh -c 'psql -c "select 1"'	ask
+bash -c "kubectl delete ns x"	ask
+eval "psql -c x"	ask
+eval $CMD	ask
+echo psql | bash	none
+helm uninstall x	ask
+helm list	none
+helm repo list	none
+helm install x y	ask
+flux get kustomizations	none
+flux reconcile ks x	ask
+talosctl get members	none
+talosctl reboot	ask
+aws s3 ls	none
+aws s3 rm s3://b/k	ask
+aws sts get-caller-identity	none
+aws ec2 describe-instances --region eu-west-1	none
+aws --profile p ec2 terminate-instances --instance-ids i-1	ask
+aws rds delete-db-instance --db-instance-identifier x	ask
+aws rds describe-db-instances	none
+aws rds-data execute-statement --sql x	ask
+aws dynamodb put-item --table-name t	ask
+aws dynamodb scan --table-name t	none
+aws ssm start-session --target i-1	ask
+aws ecs execute-command --cluster c	ask
+terraform plan	none
+terraform state list	none
+terraform state rm x.y	ask
+terraform apply	ask
+tofu destroy	ask
+git push --force	ask
+git push --force-with-lease origin main	ask
+git push origin +main	ask
+git push origin :old	ask
+git push origin --delete old	ask
+git push origin main	none
+git push -u origin main	none
+git -C /tmp/x push --force	ask
+git reset --hard HEAD~1	ask
+git reset --soft HEAD~1	none
+git branch -D x	ask
+git branch -d x	ask
+git branch	none
+git clean -fd	ask
+git clean -n	none
+git checkout .	ask
+git checkout -- f	ask
+git checkout -b feature	none
+git restore .	ask
+git restore f	none
+git stash drop	ask
+git stash	none
+git reflog expire --all	ask
+git gc --prune=now	ask
+git status	none
+git commit -m "fix psql bug"	none
+echo "run psql later"	none
+echo "kubectl delete ns x"	none
+ls -la	none
+make deploy	none
+./unknown-binary --x	none

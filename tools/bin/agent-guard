@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """agent-guard: policy helper for AI agent shell commands.
 
-Usage: agent-guard parse '<command>'
+Usage: agent-guard parse|check|explain '<command>'
 """
 from __future__ import annotations
 
@@ -12,7 +12,19 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 
 from agent_guard.parse import parse_command  # noqa: E402
+from agent_guard.rules import Ctx, decide_bash, explain_bash, load_policy  # noqa: E402
 from agent_guard.unwrap import unwrap  # noqa: E402
+
+
+def _policy() -> dict:
+    default = os.path.join(os.path.expanduser("~"), ".config", "agent-guard", "policy.json")
+    return load_policy(os.environ.get("AGENT_GUARD_POLICY") or default)
+
+
+def _ctx() -> Ctx:
+    cwd = os.getcwd()
+    tmp = os.environ.get("TMPDIR", "/tmp")
+    return Ctx(cwd, os.environ.get("CLAUDE_PROJECT_DIR") or cwd, os.path.expanduser("~"), [tmp, "/tmp"])
 
 
 def main(argv: list) -> int:
@@ -20,7 +32,16 @@ def main(argv: list) -> int:
         for inv in unwrap(parse_command(argv[2])):
             print(json.dumps({"argv": inv.argv, "via_xargs": inv.via_xargs, "opaque": inv.opaque}))
         return 0
-    print("usage: agent-guard parse '<command>'", file=sys.stderr)
+    if len(argv) == 3 and argv[1] == "check":
+        d = decide_bash(argv[2], _policy(), _ctx())
+        print("none" if d.decision == "none" else "\t".join([d.decision, d.rule, d.reason]))
+        return 0
+    if len(argv) == 3 and argv[1] == "explain":
+        for inv, d in explain_bash(argv[2], _policy(), _ctx()):
+            tail = "%s\t%s" % (d.rule, d.reason) if d.decision != "none" else ""
+            print("\t".join([json.dumps(inv.argv), d.decision, tail]).rstrip("\t"))
+        return 0
+    print("usage: agent-guard parse|check|explain '<command>'", file=sys.stderr)
     return 2
 
 
