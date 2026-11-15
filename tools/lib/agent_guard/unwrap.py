@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional, Set
 from .parse import MAX_DEPTH, Invocation, parse_command
 
 _ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_SHELLS = {"sh", "bash", "zsh"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 
 
 def _clone(inv: Invocation, argv: List[str], dyn: List[bool], **kw: bool) -> Invocation:
@@ -67,12 +67,54 @@ def _wrapper_offset(name: str, args: List[str]) -> Optional[int]:
 
 
 def _shell_script(args: List[str]) -> Optional[str]:
-    for i, a in enumerate(args):
-        if a.startswith("--") or not a.startswith("-"):
-            return None
+    """The -c script of a shell invocation, or None when it has none."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-o", "-O", "+o", "+O"):  # option with a separate argument
+            i += 2
+            continue
+        if a.startswith("--"):  # --norc, --login, --posix, ...
+            i += 1
+            continue
+        if not a.startswith("-"):
+            return None  # script file
         if "c" in a[1:]:
             return args[i + 1] if i + 1 < len(args) else None
+        i += 1
     return None
+
+
+def _env_split_string(args: List[str]) -> Optional[str]:
+    """Command string given to `env -S`, with the words after it appended."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--" or not a.startswith("-") or a == "-":
+            return None
+        if a in ("-S", "--split-string") and i + 1 < len(args):
+            return " ".join(args[i + 1 :])
+        if a.startswith("--split-string="):
+            return " ".join([a[len("--split-string=") :]] + args[i + 1 :])
+        if a.startswith("-S") and not a.startswith("--"):
+            return " ".join([a[2:]] + args[i + 1 :])
+        i += 2 if a in ("-u", "-C") else 1
+    return None
+
+
+def _find_execs(inv: Invocation) -> List[Invocation]:
+    res: List[Invocation] = []
+    argv, i = inv.argv, 1
+    while i < len(argv):
+        if argv[i] in ("-exec", "-execdir", "-ok", "-okdir"):
+            j = i + 1
+            while j < len(argv) and argv[j] not in (";", "+"):
+                j += 1
+            if j > i + 1:
+                res.append(_clone(inv, argv[i + 1 : j], inv.dynamic[i + 1 : j]))
+            i = j
+        i += 1
+    return res
 
 
 def _xargs_offset(args: List[str]) -> int:
@@ -90,7 +132,8 @@ def _xargs_offset(args: List[str]) -> int:
 def _ssh_command(args: List[str]) -> List[str]:
     with_arg = {"-p", "-l", "-i", "-o", "-F", "-J", "-L", "-R", "-D", "-b", "-c", "-e", "-m", "-O", "-S", "-w", "-W", "-E", "-B", "-I"}
     i = _skip_opts(args, with_arg)
-    return args[i + 1 :]  # skip HOST
+    cmd = args[i + 1 :]  # skip HOST
+    return cmd[1:] if cmd[:1] == ["--"] else cmd
 
 
 def _step(inv: Invocation) -> List[Invocation]:
@@ -104,12 +147,24 @@ def _step(inv: Invocation) -> List[Invocation]:
         return _rest(inv, k)
     name, args = os.path.basename(argv[0]), argv[1:]
 
+    if name == "env":
+        split = _env_split_string(args)
+        if split is not None:
+            return parse_command(split)
     off = _wrapper_offset(name, args)
     if off is not None:
         return _rest(inv, 1 + off)
     if name in _SHELLS:
         script = _shell_script(args)
-        return parse_command(script) if script is not None else []
+        if script is None:
+            inv.opaque = True  # reads its script from stdin or a file
+            return []
+        return parse_command(script)
+    if name == "eval":
+        inv.opaque = True
+        return []
+    if name == "find":
+        return _find_execs(inv)
     if name == "xargs":
         off = _xargs_offset(args)
         if 1 + off >= len(argv):
@@ -127,7 +182,7 @@ def _step(inv: Invocation) -> List[Invocation]:
 
 def _expand(inv: Invocation, depth: int) -> List[Invocation]:
     if depth > MAX_DEPTH:
-        return []
+        return [Invocation([], [], [], inv.raw, opaque=True)]
     res: List[Invocation] = []
     for nxt in _step(inv):
         res.append(nxt)
