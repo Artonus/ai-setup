@@ -249,19 +249,25 @@ mcp_rewrite() {
 # sync_mcp <desired-json|"">: make ~/.claude.json's mcpServers hold exactly our servers on top of
 # whatever else is there; servers we added earlier but no longer declare are removed.
 sync_mcp() {
-  local want=$1 cur new names old tmp
+  local want=$1 new names old tmp curf wantf
   [ -n "$want" ] || [ -f "$MCP_STATE" ] || return 0
   [ -n "$want" ] || want='{}'
-  cur='{}'
-  if [ -f "$CLAUDE_JSON" ]; then cur="$(cat "$CLAUDE_JSON")"; fi
-  names="$(printf '%s' "$want" | jq -r '(.mcpServers // {}) | keys[]')"
+  # Pass the JSON to jq as files, not arguments: ~/.claude.json can exceed the OS limit for one
+  # argument (128 KB on Linux), which made `jq --argjson` fail with "Argument list too long".
+  curf="$(mktemp "${TMPDIR:-/tmp}/ai-setup-cur.XXXXXX")"
+  wantf="$(mktemp "${TMPDIR:-/tmp}/ai-setup-want.XXXXXX")"
+  if [ -f "$CLAUDE_JSON" ]; then cp "$CLAUDE_JSON" "$curf"; else printf '{}\n' > "$curf"; fi
+  printf '%s\n' "$want" > "$wantf"
+  names="$(jq -r '(.mcpServers // {}) | keys[]' "$wantf")"
   old="$(cat "$MCP_STATE" 2>/dev/null || true)"
-  new="$(jq -n --argjson c "$cur" --argjson w "$want" --arg old "$old" '
+  new="$(jq -n --slurpfile c "$curf" --slurpfile w "$wantf" --arg old "$old" '
     ($old | split("\n") | map(select(. != ""))) as $o
+    | $c[0] as $c | $w[0] as $w
     | $c | .mcpServers = ((((.mcpServers // {}) | del(.[$o[]])) ) + ($w.mcpServers // {}))
     | if .mcpServers == {} then del(.mcpServers) else . end')"
-  if [ "$(printf '%s' "$new" | jq -S .)" = "$(printf '%s' "$cur" | jq -S .)" ] \
-     && [ "$names" = "$old" ]; then return 0; fi
+  if [ "$(printf '%s' "$new" | jq -S .)" = "$(jq -S . "$curf")" ] \
+     && [ "$names" = "$old" ]; then rm -f "$curf" "$wantf"; return 0; fi
+  rm -f "$curf" "$wantf"
   tmp="$(mktemp "${TMPDIR:-/tmp}/ai-setup-mcp.XXXXXX")"
   printf '%s\n' "$new" > "$tmp"
   act "update MCP servers in $CLAUDE_JSON" mcp_rewrite "$tmp" "$names"
