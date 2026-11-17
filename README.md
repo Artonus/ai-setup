@@ -36,6 +36,7 @@ Requires bash and, only when you use an overlay with JSON configs, `jq`.
 ./install.sh --dry-run   # see what would happen
 ./install.sh             # do it
 ./install.sh --uninstall # remove what it created (backups are kept)
+./install.sh --no-guard # install without the agent guard (see "Agent guard"); --guard is the default
 ```
 
 Files already in the way are moved to `<name>.bak.<timestamp>`, never deleted. The installer
@@ -116,6 +117,7 @@ files (SSH keys, `.env`) outright. The rules live in `shared/agent-guard/policy.
 
 - **Modes.** `mode` is `shadow` (the shipped default: every decision is only logged, nothing is blocked) or
   `enforce` (the guard asks or blocks). Run in shadow for a while, review the log, then switch the mode in your overlay: put `{"mode": "enforce"}` in the overlay's `shared/agent-guard/policy.json`.
+- **Turn it off.** `./install.sh --no-guard` leaves the guard out: no Claude Code hook (`~/.claude/settings.json` becomes a generated copy without it), no OpenCode plugin, no `~/bin/agent-guard`, no policy. A guard from an earlier run is removed. `./install.sh --guard` (the default) puts it back.
 - **Rollout.** Run `./install.sh` right after pulling the commit that registers the hook: until the policy is
   installed the guard falls back to the repo copy next to `tools/bin/agent-guard` (the log line says
   `"policy": "repo-fallback"`), and a guard failure logs its cause in the `error` field.

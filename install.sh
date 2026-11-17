@@ -14,6 +14,7 @@ MCP_STATE="$STATE_DIR/mcp-servers"
 STAMP="$(date +%Y%m%d%H%M%S)"
 DRY_RUN=0
 UNINSTALL=0
+GUARD=1
 CHANGES=0
 NEW_MANIFEST=""
 
@@ -32,13 +33,16 @@ merge(.[0]; .[1])'
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--dry-run] [--uninstall]
+Usage: install.sh [--dry-run] [--uninstall] [--guard|--no-guard]
 
 Symlinks the shared Claude Code / OpenCode / Kilo config into ~/.claude,
 ~/.config/opencode and ~/.config/kilo. Existing files are backed up, never deleted.
 
   --dry-run    Show what would change; touch nothing.
   --uninstall  Remove everything a previous run created (backups are kept).
+  --guard      Install the agent guard: the Claude Code PreToolUse hook, the OpenCode plugin,
+               ~/bin/agent-guard and its policy (default).
+  --no-guard   Install without the agent guard. A guard installed by an earlier run is removed.
   -h, --help   Show this help.
 
 Environment:
@@ -137,7 +141,16 @@ children() {
   {
     ls -1 "$REPO/$1/$2" 2>/dev/null || true
     if [ -n "${AI_SETUP_OVERLAY:-}" ]; then ls -1 "$AI_SETUP_OVERLAY/$1/$2" 2>/dev/null || true; fi
-  } | grep -v '^\.gitkeep$' | sort -u || true
+  } | grep -v '^\.gitkeep$' | guard_filter "$1/$2" | sort -u || true
+}
+
+# guard_filter <area>/<kind>: with --no-guard, drop the guard's own entries (the binary in tools/bin,
+# the plugin in opencode/plugins) from a list of names on stdin.
+guard_filter() {
+  case $1 in
+    tools/bin|opencode/plugins) if [ "$GUARD" = 1 ]; then cat; else grep -vx 'agent-guard' || true; fi ;;
+    *) cat ;;
+  esac
 }
 
 # link_children <area> <kind> <destdir> [<winning-area>]: link every entry of <area>/<kind> into
@@ -204,18 +217,28 @@ write_generated() {
   act "write $dest (merged with overlay)" place_copy "$tmp" "$dest"
 }
 
-# install_json <area> <name> <dest>: symlink the base config, or write base+overlay merged.
+# Drops the agent guard's PreToolUse hook from a Claude Code settings document (--no-guard).
+NO_GUARD_SETTINGS_JQ='if (.hooks.PreToolUse? // null) == null then . else
+  .hooks.PreToolUse |= (map(.hooks |= map(select((.command // "") | contains("agent-guard") | not)))
+                        | map(select((.hooks | length) > 0)))
+  | if (.hooks.PreToolUse | length) == 0 then del(.hooks.PreToolUse) else . end end'
+
+# install_json <area> <name> <dest> [<filter>]: symlink the base config, or write base+overlay merged.
+# With --no-guard, a <filter> (a jq program) is also applied, which forces a generated file.
 install_json() {
-  local base="$REPO/$1/$2" over="" tmp
+  local base="$REPO/$1/$2" over="" tmp filter=""
+  if [ -n "${4:-}" ] && [ "$GUARD" = 0 ]; then filter=$4; fi
   if [ -n "${AI_SETUP_OVERLAY:-}" ] && [ -f "$AI_SETUP_OVERLAY/$1/$2" ]; then
     over="$AI_SETUP_OVERLAY/$1/$2"
   fi
-  if [ -z "$over" ]; then
+  if [ -z "$over" ] && [ -z "$filter" ]; then
     link "$base" "$3"
     return 0
   fi
+  command -v jq >/dev/null 2>&1 || die "jq is required to write $3 without the agent guard"
   tmp="$(mktemp "${TMPDIR:-/tmp}/ai-setup-json.XXXXXX")"
-  jq -s "$MERGE_JQ" "$base" "$over" > "$tmp"
+  if [ -n "$over" ]; then jq -s "$MERGE_JQ" "$base" "$over" > "$tmp"; else cp "$base" "$tmp"; fi
+  if [ -n "$filter" ]; then jq "$filter" "$tmp" > "$tmp.f" && mv "$tmp.f" "$tmp"; fi
   write_generated "$tmp" "$3"
   rm -f "$tmp"
 }
@@ -295,7 +318,7 @@ install_all() {
   local kind sub
   link "$(src_for shared AGENTS.md)" "$CLAUDE_DIR/AGENTS.md"
   link "$(src_for claude CLAUDE.md)" "$CLAUDE_DIR/CLAUDE.md"
-  install_json claude settings.json "$CLAUDE_DIR/settings.json"
+  install_json claude settings.json "$CLAUDE_DIR/settings.json" "$NO_GUARD_SETTINGS_JQ"
   sync_mcp "$(mcp_desired)"
   link "$(src_for shared AGENTS.md)" "$OPENCODE_DIR/AGENTS.md"
   install_json opencode opencode.json "$OPENCODE_DIR/opencode.json"
@@ -317,7 +340,9 @@ install_all() {
     link_children opencode "$kind" "$OPENCODE_DIR/$kind"
   done
   # Agent guard policy, read by ~/bin/agent-guard (an overlay policy is deep-merged on top).
-  install_json shared agent-guard/policy.json "${XDG_CONFIG_HOME:-$HOME/.config}/agent-guard/policy.json"
+  if [ "$GUARD" = 1 ]; then
+    install_json shared agent-guard/policy.json "${XDG_CONFIG_HOME:-$HOME/.config}/agent-guard/policy.json"
+  fi
   # Helper scripts (e.g. the meeting recorder), linked into ~/bin, which must be on PATH.
   link_children tools bin "$HOME/bin"
 }
@@ -371,6 +396,8 @@ main() {
     case $1 in
       --dry-run) DRY_RUN=1 ;;
       --uninstall) UNINSTALL=1 ;;
+      --guard) GUARD=1 ;;
+      --no-guard) GUARD=0 ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown option: $1" ;;
     esac
