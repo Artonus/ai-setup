@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: background-dispatch
+expected_outcome: |
+  Retains the original run, treats dispatch completion separately from task
+  completion, uses the parameterised waiter, and requires gate/review/Git evidence
+  before starting the next ticket. Makes no live control call.

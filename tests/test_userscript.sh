@@ -63,6 +63,9 @@ const lobby = () => run(initialState(true), [{ type: 'url', url: URL1 }]).s;
 t('meetCode', () => {
   assert.strictEqual(meetCode(URL1), 'abc-defg-hij');
   assert.strictEqual(meetCode(URL1 + '?authuser=1'), 'abc-defg-hij');
+  assert.strictEqual(meetCode('https://meet.google.com/meet/rvr-ityp-jvx'), 'rvr-ityp-jvx'); // real link form
+  assert.strictEqual(meetCode('https://meet.google.com/meet/rvr-ityp-jvx?authuser=1'), 'rvr-ityp-jvx');
+  assert.strictEqual(meetCode('https://meet.google.com/other/rvr-ityp-jvx'), null);
   assert.strictEqual(meetCode('https://meet.google.com/landing'), null);
   assert.strictEqual(meetCode('https://meet.google.com/abc-defg-hijk'), null);
   assert.strictEqual(meetCode('https://evil.com/abc-defg-hij'), null);
@@ -76,6 +79,16 @@ t('classify by text PL/EN and attributes', () => {
   assert.strictEqual(classify({ ariaLabel: 'Leave call' }, C), 'leave');
   assert.strictEqual(classify({ ariaLabel: 'Opuść rozmowę' }, C), 'leave');
   assert.strictEqual(classify({ jsname: 'Qx7uuf', text: 'whatever' }, C), 'join');
+  assert.strictEqual(classify({ jsname: 'CQylAd', ariaLabel: 'Opuść rozmowę', text: 'call_end' }, C), 'leave');
+  // real lobby button from live Meet (pl): no jsname, no aria, text only
+  assert.strictEqual(classify({ jsname: null, ariaLabel: null, text: 'Dołącz' }, C), 'join');
+  assert.strictEqual(classify({ text: 'Join' }, C), 'join');
+  assert.strictEqual(classify({ text: 'Mimo wszystko dołącz' }, C), 'join'); // shown with the transcription notice
+  assert.strictEqual(classify({ text: 'Join anyway' }, C), 'join');
+  assert.strictEqual(classify({ text: 'Inne sposoby dołączenia' }, C), null);
+  assert.strictEqual(classify({ ariaLabel: 'Inne sposoby dołączenia', text: 'Inne sposoby dołączeniaexpand_more' }, C), null);
+  assert.strictEqual(classify({ text: 'phone_forwardedDołącz z dźwiękiem z telefonu' }, C), null);
+  assert.strictEqual(classify({ ariaLabel: 'Wyłącz mikrofon', text: 'mic' }, C), null);
   assert.strictEqual(classify({ text: 'Present now' }, C), null);
   assert.strictEqual(classify({}, C), null);
 });

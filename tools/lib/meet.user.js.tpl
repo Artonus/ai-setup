@@ -31,18 +31,22 @@
   // "Debug: log buttons" on a real Meet page to see what the candidates look like, then fix this object.
   const CONFIG = {
     buttons: {
-      // NIEZWERYFIKOWANE: jsname values come from memory and may be wrong or stale.
-      join:  { jsname: ['Qx7uuf'], text: /^(dołącz teraz|join now)$/i },
+      // Verified on live Meet (pl, 2026-11-09): the lobby join button has no jsname or aria label and
+      // reads just "Dołącz" ("Mimo wszystko dołącz" when Meet shows the transcription notice); the "Join now" / "Dołącz teraz" form is kept for other layouts.
+      // Anchored, so "Inne sposoby dołączenia" and "Dołącz z dźwiękiem z telefonu" do not match.
+      join:  { jsname: ['Qx7uuf'], text: /^(dołącz( teraz)?|mimo wszystko dołącz|join( now| anyway)?)$/i },
       ask:   { jsname: [],         text: /^(poproś o dołączenie|ask to join)$/i },
-      // NIEZWERYFIKOWANE: the in-call hang-up button; its visibility means "we are in the call".
-      leave: { jsname: [],         text: /^(leave call|opuść rozmowę|opuść połączenie|zakończ połączenie)$/i },
+      // The in-call hang-up button (verified, pl: aria "Opuść rozmowę", jsname CQylAd); its
+      // visibility means "we are in the call".
+      leave: { jsname: ['CQylAd'], text: /^(leave call|opuść rozmowę|opuść połączenie|zakończ połączenie)$/i },
     },
     pingMs: 5000,          // ping interval while in a call (daemon timeout is 20 s by default)
     leaveGoneMs: 4000,     // leave button must stay gone this long before we treat it as hang-up
     waitTimeoutMs: 15 * 60 * 1000, // give up waiting in the "Ask to join" waiting room
   };
 
-  const CODE_RE = /^https:\/\/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)/;
+  // Verified: Meet also serves meetings as /meet/<code> (e.g. from a calendar or shared link).
+  const CODE_RE = /^https:\/\/meet\.google\.com\/(?:meet\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)/;
 
   function meetCode(url) {
     const m = CODE_RE.exec(url || '');
@@ -258,7 +262,7 @@
       rows.push({ kind: classify(d, CONFIG), visible: visible(el), jsname: d.jsname, aria: d.ariaLabel,
                   tooltip: d.tooltip, text: (d.text || '').replace(/\s+/g, ' ').trim().slice(0, 60) });
     });
-    console.log('[meet-rec] buttons (' + why + '), phase=' + state.phase + ', code=' + state.code);
+    console.log('[meet-rec] buttons (' + why + '), phase=' + state.phase + ', code=' + state.code + ', url=' + location.href.replace(/[?#].*$/, ''));
     console.table(rows);
   }
 

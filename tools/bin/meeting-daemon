@@ -37,7 +37,7 @@ from pathlib import Path
 NAME = "meeting-daemon"
 UNIT = NAME + ".service"
 MEET_ORIGIN = "https://meet.google.com"
-CODE_RE = re.compile(r"^https://meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)")
+CODE_RE = re.compile(r"^https://meet\.google\.com/(?:meet/)?([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)")
 MAX_BODY = 16 * 1024
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "lib" / "meet.user.js.tpl"

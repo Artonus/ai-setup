@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: restart-identity
+expected_outcome: |
+  Stops automatic control and publication, reconciles ownership without altering
+  unfamiliar work, and explains that the bounded waiter cannot provide lossless
+  event delivery without a cursor; it reconciles once on timeout.
