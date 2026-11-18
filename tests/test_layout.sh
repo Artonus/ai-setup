@@ -136,7 +136,7 @@ test_layout_opencode_google_calendar_is_off_until_credentials_exist() {
 
 test_layout_opencode_mcp_credentials_are_env_references() {
   local o="$ROOT/opencode/opencode.json"
-  if jq -e '[.mcp.servers[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.client_id, .client_secret) | select(. != null))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
+  if jq -e '[.mcp.servers[] | ((.headers // {}) | to_entries[].value), ((.oauth // {}) | objects | (.client_id, .client_secret) | select(. != null))] | all(test("^(Bearer |Basic )?\\{env:[A-Z0-9_]+\\}$"))' "$o" >/dev/null; then ok; else fail "an MCP header or OAuth credential is not an {env:VAR} reference"; fi
 }
 
 test_layout_secrets_md_documents_every_env_reference() {
@@ -181,7 +181,7 @@ test_layout_opencode_declares_trilium_with_env_bearer_token() {
 test_layout_claude_mcp_json_declares_trilium_with_env_bearer_token() {
   local m="$ROOT/claude/mcp.json"
   if jq -e '.mcpServers.trilium.type == "http" and .mcpServers.trilium.url == "${TRILIUM_MCP_URL}"' "$m" >/dev/null; then ok; else fail "trilium not declared in claude/mcp.json"; fi
-  if jq -e '[.mcpServers[].headers // {} | to_entries[].value] | all(test("^Bearer \\$\\{[A-Z0-9_]+\\}$"))' "$m" >/dev/null; then ok; else fail "claude MCP header is not a \${VAR} reference"; fi
+  if jq -e '[.mcpServers[].headers // {} | to_entries[].value] | all(test("^(Bearer|Basic) \\$\\{[A-Z0-9_]+(:-)?\\}$"))' "$m" >/dev/null; then ok; else fail "claude MCP header is not a \${VAR} reference"; fi
 }
 
 test_layout_anthropic_skills_is_a_submodule() {
@@ -201,7 +201,7 @@ test_layout_kilo_config_is_v1_with_superpowers_and_env_credentials() {
   if jq empty "$k" >/dev/null 2>&1; then ok; else fail "kilo/kilo.json is not valid JSON"; return; fi
   if jq -e '.plugin | index("superpowers@git+https://github.com/obra/superpowers.git") != null' "$k" >/dev/null; then ok; else fail "superpowers plugin not declared under .plugin (Kilo uses V1 keys)"; fi
   if jq -e '(has("plugins") or has("permissions") or has("providers")) | not' "$k" >/dev/null; then ok; else fail "kilo/kilo.json has a V2 top-level key"; fi
-  if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.environment // {}) | to_entries[].value | select(test("KEY|TOKEN|PAT|SECRET"; "i")))] | all(test("^(Bearer )?\\{env:[A-Z0-9_]+\\}$"))' "$k" >/dev/null; then ok; else fail "a Kilo MCP credential is not an {env:VAR} reference"; fi
+  if jq -e '[.mcp[] | ((.headers // {}) | to_entries[].value), ((.environment // {}) | to_entries[].value | select(test("KEY|TOKEN|PAT|SECRET"; "i")))] | all(test("^(Bearer |Basic )?\\{env:[A-Z0-9_]+\\}$"))' "$k" >/dev/null; then ok; else fail "a Kilo MCP credential is not an {env:VAR} reference"; fi
 }
 
 test_layout_matt_workflow_skills_are_not_switched_off() {
@@ -217,6 +217,12 @@ test_layout_agent_memory_mcp_is_wired_everywhere() {
   if jq -e '.mcpServers["agent-memory"] | .type == "http" and .url == "${AGENT_MEMORY_URL}"' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "claude/mcp.json lacks agent-memory"; fi
   if jq -e '.mcp.servers["agent-memory"] | .type == "remote" and .url == "{env:AGENT_MEMORY_URL}" and .disabled == false' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json lacks agent-memory"; fi
   if jq -e '.mcp["agent-memory"] | .type == "remote" and .url == "{env:AGENT_MEMORY_URL}" and .enabled == true' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json lacks agent-memory"; fi
+}
+
+test_layout_agent_memory_sends_basic_auth_from_env() {
+  if jq -e '.mcpServers["agent-memory"].headers.Authorization == "Basic ${AGENT_MEMORY_BASIC_AUTH:-}"' "$ROOT/claude/mcp.json" >/dev/null; then ok; else fail "claude/mcp.json agent-memory lacks the basic-auth header from env"; fi
+  if jq -e '.mcp.servers["agent-memory"].headers.Authorization == "Basic {env:AGENT_MEMORY_BASIC_AUTH}"' "$ROOT/opencode/opencode.json" >/dev/null; then ok; else fail "opencode.json agent-memory lacks the basic-auth header from env"; fi
+  if jq -e '.mcp["agent-memory"].headers.Authorization == "Basic {env:AGENT_MEMORY_BASIC_AUTH}"' "$ROOT/kilo/kilo.json" >/dev/null; then ok; else fail "kilo.json agent-memory lacks the basic-auth header from env"; fi
 }
 
 test_layout_memory_search_is_gone() {

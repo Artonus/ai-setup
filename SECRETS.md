@@ -15,7 +15,8 @@ Work-only variables live in the private overlay's own `SECRETS.md`.
 | `FIRECRAWL_API_KEY` | `firecrawl` MCP (OpenCode and Claude Code) | Yes, to use it | Create a key in your Firecrawl dashboard (firecrawl.dev) |
 | `TRILIUM_MCP_URL` | `trilium` MCP (OpenCode and Claude Code) | Yes, to use it | Your Trilium MCP endpoint, e.g. `https://trilium.example.com/mcp` |
 | `TRILIUM_MCP_TOKEN` | `trilium` MCP (OpenCode and Claude Code) | Yes, to use it | Trilium ETAPI token (Options > ETAPI > Create new token) |
-| `AGENT_MEMORY_URL` | `agent-memory` MCP (OpenCode, Kilo and Claude Code) | Yes, to use it | The memory server's MCP endpoint, `https://<host>/mcp` (no trailing slash). Not a secret, but reachable only from the LAN or Tailscale |
+| `AGENT_MEMORY_URL` | `agent-memory` MCP (OpenCode, Kilo and Claude Code) | Yes, to use it | The memory server's MCP endpoint, `https://<host>/mcp` (no trailing slash). Not a secret. Two ways in: the internal hostname (LAN or Tailscale only, no credentials) and a public hostname behind Traefik basic auth (needs `AGENT_MEMORY_BASIC_AUTH`). Use the work-network one where Tailscale does not work |
+| `AGENT_MEMORY_BASIC_AUTH` | `agent-memory` MCP (OpenCode, Kilo and Claude Code), `agent-memory-smoke` | Only with the public URL | A secret: base64 of `user:password`. It lives in `agent-memory/.basic-auth` on the homelab server (`ssh <server> cat <homelab>/agent-memory/.basic-auth`). Leave it unset on machines that use the internal URL |
 | `GOOGLE_MCP_CLIENT_ID` | `google-calendar` MCP | Only to enable it | Google Cloud OAuth client (web application) |
 | `GOOGLE_MCP_CLIENT_SECRET` | `google-calendar` MCP | Only to enable it | Same OAuth client |
 | `ANTHROPIC_API_KEY` | Anthropic models in OpenCode | Only if you use Claude there | Claude Console. Subscriptions cannot be used. Alternatively run `opencode auth login` |

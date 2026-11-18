@@ -13,7 +13,10 @@
     },
     "agent-memory": {
       "type": "http",
-      "url": "${AGENT_MEMORY_URL}"
+      "url": "${AGENT_MEMORY_URL}",
+      "headers": {
+        "Authorization": "Basic ${AGENT_MEMORY_BASIC_AUTH:-}"
+      }
     },
     "playwright": {
       "type": "stdio",

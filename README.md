@@ -100,8 +100,11 @@ removed on the next run, and `--uninstall` takes ours back out. `trilium` reads 
 started with `npx`, so Node.js must be on `PATH`. Kilo gets the same servers in `kilo/kilo.json`.
 
 `agent-memory` is the agents' memory: a self-hosted Graphiti knowledge graph on FalkorDB, running on the
-homelab server behind Traefik (internal chain: LAN and Tailscale only; the server has no authentication of its
-own). Export `AGENT_MEMORY_URL` (the `/mcp` endpoint, no trailing slash). Facts are namespaced by `group_id`
+homelab server behind Traefik. The server has no authentication of its own, so there are two ways in: an
+internal hostname (LAN and Tailscale only, no credentials) and a public hostname behind the Cloudflare proxy
+with Traefik basic auth, for networks where Tailscale does not work (a company VPN). Export `AGENT_MEMORY_URL`
+(the `/mcp` endpoint, no trailing slash: `/mcp/` redirects to plain http) and, for the public hostname only,
+`AGENT_MEMORY_BASIC_AUTH` (see `SECRETS.md`). Facts are namespaced by `group_id`
 (`personal`, `work`), and a new fact that contradicts an old one invalidates it while keeping its history.
 The stack lives in the homelab repo (`agent-memory/`), not here. `tools/bin/agent-memory-smoke` checks a
 running server: write and find, contradiction, group isolation and duplicate episodes

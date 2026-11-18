@@ -4,7 +4,11 @@
 Talks MCP over streamable HTTP with the standard library only (macOS system Python 3.9 is enough).
 Writes only to the groups smoke-a and smoke-b and clears both before and after.
 
-    AGENT_MEMORY_URL=https://host/mcp/ agent-memory-smoke [--url URL] [--list-tools]
+    AGENT_MEMORY_URL=https://host/mcp agent-memory-smoke [--url URL] [--list-tools]
+
+Use the path without a trailing slash: the server redirects /mcp/ to a plain http URL.
+For the public hostname also set AGENT_MEMORY_BASIC_AUTH (base64 of user:password); it is sent
+as an "Authorization: Basic" header and left out when empty (the LAN and tailnet hostname needs none).
 
 Exit code 0 when every check passes.
 """
@@ -38,9 +42,14 @@ class Mcp:
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def _post(self, body: dict) -> str:
-        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        # Cloudflare rejects urllib's default User-Agent with a 403, so send our own.
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "User-Agent": "agent-memory-smoke/1"}
         if self.session:
             headers["Mcp-Session-Id"] = self.session
+        basic = os.environ.get("AGENT_MEMORY_BASIC_AUTH")
+        if basic:
+            headers["Authorization"] = "Basic " + basic
         req = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
         with urllib.request.urlopen(req, timeout=90) as resp:
             self.session = resp.headers.get("Mcp-Session-Id") or self.session

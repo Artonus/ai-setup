@@ -34,7 +34,10 @@
       "agent-memory": {
         "type": "remote",
         "url": "{env:AGENT_MEMORY_URL}",
-        "disabled": false
+        "disabled": false,
+        "headers": {
+          "Authorization": "Basic {env:AGENT_MEMORY_BASIC_AUTH}"
+        }
       },
       "playwright": {
         "type": "local",
